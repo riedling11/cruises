@@ -90,7 +90,7 @@ Function `loadTypical()`:
 - **Marine request parameters:** `daily=wave_height_max`, `timezone=auto`.
 - **Per day:** collects every value from the same calendar date ±3 days across all 10 years (up to 70 samples) at that day's location, then:
   - high, low, wind, wave height: median of the samples
-  - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.04 in`
+  - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
   - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
 - **Cache:** the result is stored in `localStorage` under `typ:v1:<slug>:<itinerary fingerprint>`. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
 
@@ -98,7 +98,8 @@ Function `loadTypical()`:
 
 Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). Each sends one weather request and one marine request covering all unique locations, with the date range set to the earliest and latest qualifying itinerary dates.
 
-- **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max`. The archive API omits `precipitation_probability_max`.
+- **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset`. The archive API omits `precipitation_probability_max`.
+- **Extra detail (forecast and recorded days only):** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days don't have them.
 - **Units:** °F, knots, inches. Wave height arrives in meters and is converted to feet (× 3.28084, one decimal).
 - **Rain display:** Forecast days show `precipitation_probability_max` as "Rain chance". Recorded days show `precipitation_sum` in inches.
 - **Sky icon:** from the WMO `weather_code` (function `wx()`).
@@ -106,10 +107,43 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 ## Display rules
 
 - **Sea state** (function `seaState()`, daily max combined wave height): under 4 ft = Slight (green), 4–8 ft = Moderate (amber), 8 ft or more = Rough (red).
-- **Wind:** daily max sustained wind in knots, with mph = kn × 1.15078 in brackets. Gusts are shown on forecast and recorded days.
+- **Wind:** compass direction plus daily max sustained wind in knots, with mph = kn × 1.15078 in brackets. Gusts are shown on forecast and recorded days when they exceed the sustained wind by more than 2 kn.
 - **Status pill** (function `status()`): "Sails in N days" before departure, "Day X of Y" during the cruise (that day's card is outlined and marked Today), "Voyage complete" afterwards.
 - **Map:** Leaflet with OpenStreetMap tiles. A dashed line runs through every day's position in order. Ports are white dots, sea days small navy dots, and today's position is red.
 - **Home page:** loads `cruises/index.json`, then every listed cruise file. Cruises are split into Upcoming (end date today or later, soonest first) and Past voyages (most recent first).
+
+## WhatsApp posts
+
+Every day card is built from one view model (function `dayModel()`). The card (`dayCard()`) and both WhatsApp texts read from that same model, so a post always matches what the page shows. The copy buttons stay disabled until weather has loaded.
+
+| Button | Text built by | Contents |
+|---|---|---|
+| **Copy today's post** (top of Voyage weather) | `waDay()` | During the cruise, today's itinerary day. Before the cruise, day 1. After it, the last day. |
+| **Copy** (on each day card) | `waDay()` | That day. |
+| **Copy full voyage** | `waVoyage()` | One two-line entry per day: date and place, then sky, high/low, wind, seas. Entries using typical values are marked _(typical)_. Today is marked ⬅️ today. |
+
+Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lines with no data are left out:
+
+```
+🚢 *<ship> – Day N (Mon Nov 30)*
+📍 <port> · <arrive – depart> · <note>      or   📍 Sea day 🌊 <sea area> (approx.)
+🌡️ High 84°F (29°C) / Low 79°F (26°C)
+⛅ Sky: <label> · ☔ <n>% chance of rain          (rain chance on forecast days only)
+😎 Feels like: 88°F (31°C) · 💧 74% humidity
+🌅 Sunrise 6:31am · 🌇 Sunset 5:40pm
+💨 Wind: E 19 kt (22 mph / 35 km/h), gusts 25 kt
+🌊 Seas: 6.1 ft (1.9 m) · Moderate
+🔜 Tomorrow: Arriving in <NEXT PORT> <icon> <label>, <high>°F (<°C>), seas <ft> ft
+📅 Full trip forecast: <page link>
+```
+
+Conversions: °C = (°F − 32) × 5/9; km/h = kn × 1.852; m = ft ÷ 3.28084. The "Tomorrow" line is left out on the last day. When the day is still showing typical values, the post says so.
+
+Copying uses `navigator.clipboard.writeText`. If the browser blocks that, it falls back to a hidden textarea and `document.execCommand('copy')`. A toast confirms the copy or reports the failure.
+
+## Link preview
+
+`index.html` carries Open Graph tags (`og:title`, `og:description`, `og:image`, `og:url`), so a shared link shows a preview card in WhatsApp. The image is `assets/og.png` (1200 × 630). Link previewers don't run JavaScript, so every cruise link shows the same generic card. The cruise details come from the post text.
 
 ## Failure behavior
 

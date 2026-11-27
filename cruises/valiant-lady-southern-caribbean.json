@@ -1,0 +1,19 @@
+{
+  "title": "Southern Caribbean Cruise",
+  "line": "Virgin Voyages",
+  "ship": "Valiant Lady",
+  "imo": "9805336",
+  "start": "2026-11-28",
+  "end": "2026-12-05",
+  "photo": "",
+  "days": [
+    { "date": "2026-11-28", "type": "port", "name": "San Juan, Puerto Rico", "lat": 18.465, "lon": -66.115, "depart": "8:00 PM", "note": "Embark" },
+    { "date": "2026-11-29", "type": "port", "name": "Charlotte Amalie, St. Thomas", "lat": 18.333, "lon": -64.920, "arrive": "8:00 AM", "depart": "6:00 PM" },
+    { "date": "2026-11-30", "type": "sea", "name": "Caribbean Sea", "lat": 17.9, "lon": -64.4 },
+    { "date": "2026-12-01", "type": "port", "name": "Road Town, Tortola", "lat": 18.420, "lon": -64.613, "arrive": "9:00 AM", "depart": "6:00 PM" },
+    { "date": "2026-12-02", "type": "port", "name": "Basseterre, St. Kitts", "lat": 17.293, "lon": -62.721, "arrive": "8:00 AM", "depart": "6:00 PM" },
+    { "date": "2026-12-03", "type": "port", "name": "St. John's, Antigua", "lat": 17.125, "lon": -61.851, "arrive": "8:00 AM", "depart": "8:00 PM" },
+    { "date": "2026-12-04", "type": "port", "name": "Philipsburg, St. Maarten", "lat": 18.015, "lon": -63.047, "arrive": "8:00 AM", "depart": "5:00 PM" },
+    { "date": "2026-12-05", "type": "port", "name": "San Juan, Puerto Rico", "lat": 18.465, "lon": -66.115, "arrive": "6:30 AM", "note": "Disembark" }
+  ]
+}

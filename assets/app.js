@@ -82,6 +82,10 @@
     if (pct < 50) return ['⛅', 'Some showers'];
     return ['🌦️', 'Often showery'];
   }
+  const compass = deg => deg == null ? '' : ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+  const toC = f => f == null ? null : Math.round((f - 32) * 5 / 9);
+  const clock = iso => { if (!iso) return ''; const [h, mi] = iso.slice(11, 16).split(':').map(Number); return `${((h + 11) % 12) + 1}:${pad(mi)}${h < 12 ? 'am' : 'pm'}`; };
+
   function seaState(ft) {
     if (ft == null) return null;
     if (ft < 4) return ['slight', 'Slight'];
@@ -148,7 +152,7 @@
               acc.lo.push(pick(wl, wi, 'temperature_2m_min', dt));
               acc.wind.push(pick(wl, wi, 'wind_speed_10m_max', dt));
               const p = pick(wl, wi, 'precipitation_sum', dt);
-              if (p != null) { acc.n++; if (p >= 0.04) acc.rainDays++; }
+              if (p != null) { acc.n++; if (p >= 0.1) acc.rainDays++; }
             }
           }
           if (ml) acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
@@ -175,7 +179,7 @@
     const [w, m] = await Promise.all([
       om(API.forecast, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null),
       om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' }).catch(() => null)
@@ -191,6 +195,8 @@
         code: g('weather_code'), hi: round(g('temperature_2m_max')), lo: round(g('temperature_2m_min')),
         rainPct: g('precipitation_probability_max'), rainIn: g('precipitation_sum'),
         wind: round(g('wind_speed_10m_max')), gust: round(g('wind_gusts_10m_max')),
+        feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
+        wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
@@ -205,7 +211,7 @@
     const [w, m] = await Promise.all([
       om(API.archive, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null),
       om(API.marine, marineBase).catch(() => om(API.marine, { ...marineBase, models: 'era5_ocean' })).catch(() => null)
@@ -221,6 +227,8 @@
         code: g('weather_code'), hi: round(g('temperature_2m_max')), lo: round(g('temperature_2m_min')),
         rainPct: null, rainIn: g('precipitation_sum'),
         wind: round(g('wind_speed_10m_max')), gust: round(g('wind_gusts_10m_max')),
+        feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
+        wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
@@ -246,7 +254,8 @@
     return '';
   }
 
-  function dayCard(day, i, cruise, today, live, typ) {
+  // One view model per day, shared by the on-page card and the WhatsApp text.
+  function dayModel(day, i, cruise, today, live, typ) {
     const d = diffDays(day.date, today);
     let src = 'typical';
     if (live && live.hi != null) src = d >= 0 ? 'forecast' : 'recorded';
@@ -261,36 +270,131 @@
     if (src !== 'typical' && lv.code != null) [icon, label] = wx(lv.code);
     else [icon, label] = wxFromRain(t.rainPct);
 
-    let rain = '—';
+    let rain = null;
     if (src === 'forecast' && lv.rainPct != null) rain = `${lv.rainPct}%`;
     else if (src === 'recorded' && lv.rainIn != null) rain = `${lv.rainIn.toFixed(2)} in`;
     else if (t.rainPct != null) rain = `${t.rainPct}%`;
     const rainLbl = src === 'recorded' ? 'Rain' : (src === 'forecast' ? 'Rain chance' : 'Rainy days');
 
-    const ss = seaState(waveFt);
-    const mph = wind == null ? '' : ` <small>(${Math.round(wind * 1.15078)} mph)</small>`;
-    const gust = src !== 'typical' && lv.gust ? ` <small>gusts ${lv.gust}</small>` : '';
-    const badge = { forecast: 'Forecast', recorded: 'Recorded', typical: 'Typical' }[src];
-    const isToday = d === 0;
+    return {
+      i, day, src, isToday: d === 0, hi, lo, wind, waveFt, waveTypical, icon, label, rain, rainLbl,
+      mph: wind == null ? null : Math.round(wind * 1.15078),
+      gust: src !== 'typical' && lv.gust && lv.gust > (wind ?? 0) + 2 ? lv.gust : null,
+      sea: seaState(waveFt),
+      feels: src !== 'typical' ? lv.feels ?? null : null,
+      rh: src !== 'typical' ? lv.rh ?? null : null,
+      dir: src !== 'typical' ? compass(lv.wdir) : '',
+      sunrise: src !== 'typical' ? clock(lv.sunrise) : '',
+      sunset: src !== 'typical' ? clock(lv.sunset) : '',
+      total: cruise.days.length
+    };
+  }
 
+  function dayCard(m) {
+    const { day, src } = m;
+    const badge = { forecast: 'Forecast', recorded: 'Recorded', typical: 'Typical' }[src];
     return `
-      <article class="day ${src} ${isToday ? 'today' : ''}">
+      <article class="day ${src} ${m.isToday ? 'today' : ''}">
         <header>
-          <div class="when"><span class="dnum">Day ${i + 1}</span> ${esc(fmtDate(day.date))}${isToday ? ' <span class="now">Today</span>' : ''}</div>
-          <span class="badge ${src}">${badge}</span>
+          <div class="when"><span class="dnum">Day ${m.i + 1}</span> ${esc(fmtDate(day.date))}${m.isToday ? ' <span class="now">Today</span>' : ''}</div>
+          <div class="hdr-r">
+            <span class="badge ${src}">${badge}</span>
+            <button class="copy" type="button" data-copy-day="${m.i}" aria-label="Copy day ${m.i + 1} for WhatsApp" title="Copy for WhatsApp">Copy</button>
+          </div>
         </header>
         <div class="where">
           <h3>${day.type === 'sea' ? `At sea <span class="approx">· ${esc(day.name)} (approx.)</span>` : esc(day.name)}</h3>
           <p class="times">${esc(times(day))}${day.note ? ` <span class="note">${esc(day.note)}</span>` : ''}</p>
         </div>
         <div class="stats">
-          <div class="stat sky"><span class="icon" aria-hidden="true">${icon || '·'}</span><span class="lbl">${esc(label || '—')}</span></div>
-          <div class="stat"><span class="val">${hi ?? '—'}°<small>/${lo ?? '—'}°</small></span><span class="lbl">High / low °F</span></div>
-          <div class="stat"><span class="val">${rain}</span><span class="lbl">${rainLbl}</span></div>
-          <div class="stat"><span class="val">${wind ?? '—'} kn${mph}${gust}</span><span class="lbl">Wind</span></div>
-          <div class="stat"><span class="val">${waveFt ?? '—'}${waveFt != null ? ' ft' : ''} ${ss ? `<span class="sea ${ss[0]}">${ss[1]}</span>` : ''}</span><span class="lbl">Seas${waveTypical ? ' (typical)' : ''}</span></div>
+          <div class="stat sky"><span class="icon" aria-hidden="true">${m.icon || '·'}</span><span class="lbl">${esc(m.label || '—')}</span></div>
+          <div class="stat"><span class="val">${m.hi ?? '—'}°<small>/${m.lo ?? '—'}°</small></span><span class="lbl">High / low °F</span></div>
+          <div class="stat"><span class="val">${m.rain ?? '—'}</span><span class="lbl">${m.rainLbl}</span></div>
+          <div class="stat"><span class="val">${m.dir ? m.dir + ' ' : ''}${m.wind ?? '—'} kn${m.mph != null ? ` <small>(${m.mph} mph)</small>` : ''}${m.gust ? ` <small>gusts ${m.gust}</small>` : ''}</span><span class="lbl">Wind</span></div>
+          <div class="stat"><span class="val">${m.waveFt ?? '—'}${m.waveFt != null ? ' ft' : ''} ${m.sea ? `<span class="sea ${m.sea[0]}">${m.sea[1]}</span>` : ''}</span><span class="lbl">Seas${m.waveTypical ? ' (typical)' : ''}</span></div>
         </div>
+        ${(m.feels != null || m.sunrise) ? `<p class="extra">${[
+          m.feels != null ? `Feels like ${m.feels}°` : '',
+          m.rh != null ? `${m.rh}% humidity` : '',
+          m.sunrise ? `Sunrise ${m.sunrise} · Sunset ${m.sunset}` : ''
+        ].filter(Boolean).join(' · ')}</p>` : ''}
       </article>`;
+  }
+
+  /* ---------- WhatsApp text ---------- */
+  // WhatsApp formatting: *bold*, _italic_. Plain text otherwise.
+  const shortPlace = d => d.type === 'sea' ? `At sea (${d.name}, approx.)` : d.name;
+  const srcWord = { forecast: 'Forecast', recorded: 'Recorded', typical: 'Typical for this date' };
+
+  function waDay(cruise, m, next, url) {
+    const d = m.day;
+    const dateShort = toUTC(d.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
+    const lines = [`🚢 *${cruise.ship} – Day ${m.i + 1} (${dateShort})*`];
+    if (d.type === 'sea') lines.push(`📍 Sea day 🌊 ${d.name} (approx.)`);
+    else lines.push(`📍 ${d.name}${times(d) ? ` · ${times(d)}` : ''}${d.note ? ` · ${d.note}` : ''}`);
+    if (m.hi != null) lines.push(`🌡️ High ${m.hi}°F (${toC(m.hi)}°C) / Low ${m.lo}°F (${toC(m.lo)}°C)`);
+    if (m.label) lines.push(`${m.icon || '⛅'} Sky: ${m.label}${m.rain != null && m.src === 'forecast' ? ` · ☔ ${m.rain} chance of rain` : ''}`);
+    if (m.feels != null) lines.push(`😎 Feels like: ${m.feels}°F (${toC(m.feels)}°C)${m.rh != null ? ` · 💧 ${m.rh}% humidity` : ''}`);
+    if (m.sunrise) lines.push(`🌅 Sunrise ${m.sunrise} · 🌇 Sunset ${m.sunset}`);
+    if (m.wind != null) lines.push(`💨 Wind: ${m.dir ? m.dir + ' ' : ''}${m.wind} kt (${m.mph} mph / ${Math.round(m.wind * 1.852)} km/h)${m.gust ? `, gusts ${m.gust} kt` : ''}`);
+    if (m.waveFt != null) lines.push(`🌊 Seas: ${m.waveFt} ft (${(m.waveFt / 3.28084).toFixed(1)} m) · ${m.sea[1]}${m.waveTypical ? ' (typical)' : ''}`);
+    if (m.hi == null && m.wind == null && m.waveFt == null) lines.push('Weather not available yet.');
+    if (next) {
+      const nd = next.day;
+      const where = nd.type === 'sea' ? 'Sea day' : nd.name.split(',')[0].toUpperCase();
+      const bits = [];
+      if (next.icon) bits.push(`${next.icon} ${next.label}`);
+      if (next.hi != null) bits.push(`${next.hi}°F (${toC(next.hi)}°C)`);
+      if (next.waveFt != null) bits.push(`seas ${next.waveFt} ft`);
+      lines.push(`🔜 Tomorrow: ${nd.type === 'sea' ? where : `Arriving in ${where}`}${bits.length ? ' ' + bits.join(', ') : ''}`);
+    }
+    if (m.src === 'typical') lines.push('_Typical conditions for this date. The live forecast starts about 2 weeks out._');
+    lines.push(`📅 Full trip forecast: ${url.replace(/^https?:\/\//, '')}`);
+    return lines.join('\n');
+  }
+
+  function waVoyage(cruise, models, url) {
+    const short = iso => toUTC(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC' });
+    const lines = [
+      `🚢 *${cruise.ship} · ${cruise.title}*`,
+      `${cruise.line} · ${fmtRange(cruise.start, cruise.end)}`,
+      ''
+    ];
+    let anyTypical = false;
+    models.forEach(m => {
+      const d = m.day;
+      const place = d.type === 'sea' ? 'At sea' : d.name.split(',')[0];
+      const parts = [];
+      if (m.hi != null) parts.push(`${m.icon || ''} ${m.hi}°/${m.lo}°`.trim());
+      if (m.wind != null) parts.push(`💨 ${m.wind} kn`);
+      if (m.waveFt != null) parts.push(`🌊 ${m.waveFt} ft ${m.sea[1]}`);
+      const typ = m.src === 'typical' || m.waveTypical;
+      if (typ) anyTypical = true;
+      lines.push(`*${short(d.date)} · ${place}*${m.isToday ? ' ⬅️ today' : ''}`);
+      lines.push(`${parts.join(' · ') || 'No data yet'}${typ ? ' _(typical)_' : ''}`);
+    });
+    lines.push('');
+    if (anyTypical) lines.push('_Typical = 10-year normal; switches to the live forecast about 2 weeks out._');
+    lines.push(url);
+    return lines.join('\n');
+  }
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove(); return ok;
+    }
+  }
+
+  function toast(msg) {
+    let el = document.getElementById('toast');
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200);
   }
 
   function drawMap(cruise, today) {
@@ -346,12 +450,17 @@
           <button class="refresh" id="refresh" type="button">Refresh</button>
         </div>
         <p class="updated" id="updated">Loading weather…</p>
+        <div class="share">
+          <span>WhatsApp:</span>
+          <button type="button" class="copy" id="copy-today" disabled>Copy today's post</button>
+          <button type="button" class="copy" id="copy-voyage" disabled>Copy full voyage</button>
+        </div>
         <div class="legend">
           <span><span class="sea slight">Slight</span> under 4 ft</span>
           <span><span class="sea moderate">Moderate</span> 4–8 ft</span>
           <span><span class="sea rough">Rough</span> 8 ft+</span>
         </div>
-        <div id="days" class="days">${cruise.days.map((d, i) => dayCard(d, i, cruise, today, null, null)).join('')}</div>
+        <div id="days" class="days">${cruise.days.map((d, i) => dayCard(dayModel(d, i, cruise, today, null, null))).join('')}</div>
         <div class="notes">
           <p><strong>Forecast</strong> days use the live Open-Meteo forecast and switch on automatically about ${FORECAST_AHEAD} days out. <strong>Typical</strong> days show the median for that date and location over the past ${TYPICAL_YEARS} years (±${TYPICAL_WINDOW} days). "Rainy days" is how often that date saw measurable rain. <strong>Recorded</strong> days show what actually happened.</p>
           <p>Wind is the daily maximum sustained wind in knots (mph in brackets). Seas are the daily maximum combined wave height. Sea-day positions are estimated noon positions; the ship's actual track will differ.</p>
@@ -359,6 +468,29 @@
       </section>`;
 
     drawMap(cruise, today);
+
+    let models = cruise.days.map((d, i) => dayModel(d, i, cruise, today, null, null));
+    const shareUrl = `${location.origin}${location.pathname}?c=${encodeURIComponent(slug)}`;
+    // "Today" = today's itinerary day during the cruise; day 1 before it; last day after it.
+    const todayIndex = () => {
+      const k = cruise.days.findIndex(d => d.date === today);
+      if (k >= 0) return k;
+      return diffDays(cruise.start, today) > 0 ? 0 : cruise.days.length - 1;
+    };
+    const copyDay = async k => {
+      const ok = await copyText(waDay(cruise, models[k], models[k + 1] || null, shareUrl));
+      toast(ok ? `Day ${k + 1} copied, paste it into WhatsApp` : 'Copy failed: your browser blocked clipboard access');
+    };
+    app.addEventListener('click', async e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.copyDay != null) copyDay(+btn.dataset.copyDay);
+      else if (btn.id === 'copy-today') copyDay(todayIndex());
+      else if (btn.id === 'copy-voyage') {
+        const ok = await copyText(waVoyage(cruise, models, shareUrl));
+        toast(ok ? 'Voyage copied, paste it into WhatsApp' : 'Copy failed: your browser blocked clipboard access');
+      }
+    });
 
     const load = async (force) => {
       const upd = document.getElementById('updated');
@@ -380,8 +512,10 @@
           loadArchiveActual(cruise, locs, archDates).catch(() => ({}))
         ]);
         const merged = { ...arch, ...live };
-        document.getElementById('days').innerHTML =
-          cruise.days.map((d, i) => dayCard(d, i, cruise, today, merged[i], typ[i])).join('');
+        models = cruise.days.map((d, i) => dayModel(d, i, cruise, today, merged[i], typ[i]));
+        document.getElementById('days').innerHTML = models.map(dayCard).join('');
+        document.getElementById('copy-today').disabled = false;
+        document.getElementById('copy-voyage').disabled = false;
         const anyData = typ.some?.(t => t && t.hi != null) || Object.values(merged).some(v => v && v.hi != null);
         upd.textContent = anyData
           ? `Updated ${new Date().toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
