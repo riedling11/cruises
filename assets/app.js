@@ -76,6 +76,19 @@
     if (code >= 95) return ['⛈️', 'Thunderstorms'];
     return ['', ''];
   }
+  // Daily weather_code reports the worst hour, so one passing shower labels the whole day "Drizzle".
+  // When rain is unlikely, describe the day by its mean cloud cover instead.
+  function sky(code, cloud, pct, rainIn) {
+    const base = cloud == null ? null
+      : cloud < 25 ? ['☀️', 'Sunny'] : cloud < 50 ? ['🌤️', 'Mostly sunny'] : cloud < 75 ? ['⛅', 'Partly cloudy'] : ['☁️', 'Mostly cloudy'];
+    if (code == null) return base || ['', ''];
+    const wet = (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
+    const storm = code >= 95;
+    if (!wet && !storm) return (code <= 3 && base) ? base : wx(code);
+    const likely = pct != null ? pct >= 50 : (rainIn != null ? rainIn >= 0.1 : true);
+    if (!likely && base) return [base[0], `${base[1]}, ${storm ? 'isolated storms' : 'passing showers'} possible`];
+    return wx(code);
+  }
   function wxFromRain(pct) {
     if (pct == null) return ['', ''];
     if (pct < 25) return ['🌤️', 'Usually dry'];
@@ -179,7 +192,7 @@
     const [w, m] = await Promise.all([
       om(API.forecast, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset,cloud_cover_mean',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null),
       om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' }).catch(() => null)
@@ -197,6 +210,7 @@
         wind: round(g('wind_speed_10m_max')), gust: round(g('wind_gusts_10m_max')),
         feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
         wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
+        cloud: g('cloud_cover_mean'),
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
@@ -211,7 +225,7 @@
     const [w, m] = await Promise.all([
       om(API.archive, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset,cloud_cover_mean',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null),
       om(API.marine, marineBase).catch(() => om(API.marine, { ...marineBase, models: 'era5_ocean' })).catch(() => null)
@@ -229,6 +243,7 @@
         wind: round(g('wind_speed_10m_max')), gust: round(g('wind_gusts_10m_max')),
         feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
         wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
+        cloud: g('cloud_cover_mean'),
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
@@ -267,7 +282,7 @@
     const waveFt = lv.waveFt ?? t.waveFt;
     const waveTypical = lv.waveFt == null && t.waveFt != null && src !== 'typical';
     let icon, label;
-    if (src !== 'typical' && lv.code != null) [icon, label] = wx(lv.code);
+    if (src !== 'typical' && (lv.code != null || lv.cloud != null)) [icon, label] = sky(lv.code, lv.cloud, src === 'forecast' ? lv.rainPct : null, lv.rainIn);
     else [icon, label] = wxFromRain(t.rainPct);
 
     let rain = null;
@@ -349,6 +364,7 @@
       lines.push(`🔜 Tomorrow: ${nd.type === 'sea' ? where : `Arriving in ${where}`}${bits.length ? ' ' + bits.join(', ') : ''}`);
     }
     if (m.src === 'typical') lines.push('_Typical conditions for this date. The live forecast starts about 2 weeks out._');
+    else if (m.waveTypical) lines.push('_Seas are typical for this date; the wave forecast reaches about a week out._');
     lines.push(`📅 Full trip forecast: ${url.replace(/^https?:\/\//, '')}`);
     return lines.join('\n');
   }
@@ -360,7 +376,7 @@
       `${cruise.line} · ${fmtRange(cruise.start, cruise.end)}`,
       ''
     ];
-    let anyTypical = false;
+    let anyTypical = false, anyTypicalSeas = false;
     models.forEach(m => {
       const d = m.day;
       const place = d.type === 'sea' ? 'At sea' : d.name.split(',')[0];
@@ -368,13 +384,15 @@
       if (m.hi != null) parts.push(`${m.icon || ''} ${m.hi}°/${m.lo}°`.trim());
       if (m.wind != null) parts.push(`💨 ${m.wind} kn`);
       if (m.waveFt != null) parts.push(`🌊 ${m.waveFt} ft ${m.sea[1]}`);
-      const typ = m.src === 'typical' || m.waveTypical;
-      if (typ) anyTypical = true;
+      let tag = '';
+      if (m.src === 'typical') { tag = ' _(typical)_'; anyTypical = true; }
+      else if (m.waveTypical) { tag = ' _(typical seas)_'; anyTypicalSeas = true; }
       lines.push(`*${short(d.date)} · ${place}*${m.isToday ? ' ⬅️ today' : ''}`);
-      lines.push(`${parts.join(' · ') || 'No data yet'}${typ ? ' _(typical)_' : ''}`);
+      lines.push(`${parts.join(' · ') || 'No data yet'}${tag}`);
     });
     lines.push('');
     if (anyTypical) lines.push('_Typical = 10-year normal; switches to the live forecast about 2 weeks out._');
+    if (anyTypicalSeas) lines.push('_Wave forecasts reach about a week out; later days show typical seas until then._');
     lines.push(url);
     return lines.join('\n');
   }

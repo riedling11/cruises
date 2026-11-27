@@ -102,7 +102,10 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 - **Extra detail (forecast and recorded days only):** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days don't have them.
 - **Units:** °F, knots, inches. Wave height arrives in meters and is converted to feet (× 3.28084, one decimal).
 - **Rain display:** Forecast days show `precipitation_probability_max` as "Rain chance". Recorded days show `precipitation_sum` in inches.
-- **Sky icon:** from the WMO `weather_code` (function `wx()`).
+- **Sky label** (function `sky()`): Open-Meteo's daily `weather_code` is the worst hour of the day, so a single passing shower labels the day "Drizzle". The label is therefore built from both `weather_code` and `cloud_cover_mean`:
+  - Clear/cloudy codes (0–3): label from mean cloud cover. Under 25% = ☀️ Sunny, 25–49% = 🌤️ Mostly sunny, 50–74% = ⛅ Partly cloudy, 75%+ = ☁️ Mostly cloudy.
+  - Drizzle/rain/shower codes (51–67, 80–82) or thunderstorm codes (95+): if rain is unlikely (forecast rain chance under 50%, or recorded rain under 0.1 in), the cloud-cover label plus ", passing showers possible" or ", isolated storms possible". Otherwise the WMO label (function `wx()`), e.g. 🌧️ Rain, ⛈️ Thunderstorms.
+  - Fog and snow codes: the WMO label.
 
 ## Display rules
 
@@ -120,7 +123,7 @@ Every day card is built from one view model (function `dayModel()`). The card (`
 |---|---|---|
 | **Copy today's post** (top of Voyage weather) | `waDay()` | During the cruise, today's itinerary day. Before the cruise, day 1. After it, the last day. |
 | **Copy** (on each day card) | `waDay()` | That day. |
-| **Copy full voyage** | `waVoyage()` | One two-line entry per day: date and place, then sky, high/low, wind, seas. Entries using typical values are marked _(typical)_. Today is marked ⬅️ today. |
+| **Copy full voyage** | `waVoyage()` | One two-line entry per day: date and place, then sky, high/low, wind, seas. Entries using all-typical values are marked _(typical)_; forecast days whose seas fall back to typical are marked _(typical seas)_, each with a matching footnote. Today is marked ⬅️ today. |
 
 Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lines with no data are left out:
 
@@ -137,7 +140,7 @@ Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lin
 📅 Full trip forecast: <page link>
 ```
 
-Conversions: °C = (°F − 32) × 5/9; km/h = kn × 1.852; m = ft ÷ 3.28084. The "Tomorrow" line is left out on the last day. When the day is still showing typical values, the post says so.
+Conversions: °C = (°F − 32) × 5/9; km/h = kn × 1.852; m = ft ÷ 3.28084. The "Tomorrow" line is left out on the last day. When the day is still showing typical values, or only its seas are typical, the post ends with a note saying which.
 
 Copying uses `navigator.clipboard.writeText`. If the browser blocks that, it falls back to a hidden textarea and `document.execCommand('copy')`. A toast confirms the copy or reports the failure.
 
