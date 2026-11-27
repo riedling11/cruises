@@ -81,8 +81,10 @@ Constants at the top of `app.js`:
 | `RECENT_BACK` | `60` | Days back served by the forecast API before switching to the archive API. |
 | `TYPICAL_YEARS` | `10` | Years of history used for typical values. |
 | `TYPICAL_WINDOW` | `3` | ± days around each date that count toward typical. |
-| `CACHE_VERSION` | `v3` |
-| `SST_FIRST_YEAR` | `2023` | First year with water-temperature history. | Bump to invalidate every viewer's cached typical values. |
+| `CACHE_VERSION` | `v4` |
+| `SST_FIRST_YEAR` | `2023` | First year with water-temperature history. |
+| `UV_FIRST_YEAR` | `2022` | First year with UV history. |
+| `PORT_RAIN_IN` | `0.02` | Inches of rain during port hours that count as a wet port day (typical only). | Bump to invalidate every viewer's cached typical values. |
 
 ## Typical (climatology) calculation
 
@@ -96,6 +98,8 @@ Function `loadTypical()`:
   - high, low, wind, wave height, feels-like, humidity, water temperature: median of the samples
   - wind direction: vector mean of the daily dominant directions, shown as an 8-point compass
   - sunrise/sunset: the most recent year's value for the same calendar date
+  - UV: from `historical-forecast-api.open-meteo.com/v1/forecast` (`daily=uv_index_max`), one request per history year from 2022 onward (`UV_FIRST_YEAR`), median of the samples. The archive API has no UV.
+  - rain while in port (port days with both `arrive` and `depart`): one extra Archive API request per year for just those port locations, `hourly=precipitation` in inches. For each sample day, precipitation is summed over the port hours (same hour window as the forecast version). The figure is the percentage of sample days where that sum is at least 0.02 in (`PORT_RAIN_IN`). Shown as "Rained while in port on N% of past days" on the card and "rain on N% of past days" in the WhatsApp post.
   - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
   - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
 - **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
@@ -107,9 +111,9 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 - **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset`. The archive API omits `precipitation_probability_max`.
 - **Hourly fields:** `precipitation_probability` (forecast only), used for the port-hours rain chance below.
 - **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. For typical days, water-temperature history only exists from 2023 onward (`SST_FIRST_YEAR`) and not in the ERA5-Ocean model, so the typical calculation makes a separate marine request (default model, `hourly=sea_surface_temperature`) for each history year from 2023 onward and takes the median of the daily means. Typical water temperature is therefore based on about three years, not ten.
-- **UV:** `uv_index_max`, forecast days only, rounded. Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
+- **UV:** `uv_index_max`, rounded. Typical days use the median from the Historical Forecast API (below). Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
 - **Port-hours rain** (function `portRain()`, forecast port days that have both `arrive` and `depart`): the highest hourly `precipitation_probability` from the arrival hour (rounded down) up to, but not including, the departure hour (rounded up). Shown on the card as "☔ N% chance of rain while in port (arrive – depart)" and in the WhatsApp day post as "🏝️ While in port …".
-- **Extra detail:** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days use the typical values; UV and port-hours rain are forecast-only.
+- **Extra detail:** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days use the typical values.
 - **Units:** °F, knots, inches. Wave height arrives in meters and is converted to feet (× 3.28084, one decimal).
 - **Rain display:** Forecast days show `precipitation_probability_max` as "Rain chance". Recorded days show `precipitation_sum` in inches.
 - **Sky label** (function `sky()`): Open-Meteo's daily `weather_code` is the worst hour of the day, so a single passing shower labels the day "Drizzle". The label is therefore built from both `weather_code` and `cloud_cover_mean`:
@@ -166,7 +170,7 @@ Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lin
 📍 <port> · <arrive – depart> · <note>      or   📍 Sea day 🌊 <sea area> (approx.)
 🌡️ High 84°F (29°C) / Low 79°F (26°C)
 ⛅ Sky: <label> · ☔ <n>% chance of rain          (rain chance on forecast days only)
-🏝️ While in port (9:00 AM – 6:00 PM): 45% chance of rain   (port days, forecast only)
+🏝️ While in port (9:00 AM – 6:00 PM): 45% chance of rain   (typical: "rain on N% of past days")
 😎 Feels like: 88°F (31°C) · 💧 74% humidity
 🕶️ UV 7 (high) · 🏊 Water 84°F (29°C)
 🌅 Sunrise 6:31am · 🌇 Sunset 5:40pm

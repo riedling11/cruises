@@ -6,12 +6,15 @@
   const RECENT_BACK = 60;      // days back the forecast API can serve as "recorded"
   const TYPICAL_YEARS = 10;    // years of history for "typical"
   const TYPICAL_WINDOW = 3;    // ± days around each date for "typical"
-  const CACHE_VERSION = 'v3';
+  const CACHE_VERSION = 'v4';
   const SST_FIRST_YEAR = 2023;  // first year with sea-surface temperature history
+  const UV_FIRST_YEAR = 2022;   // first year with UV history (historical forecast API)
+  const PORT_RAIN_IN = 0.02;    // inches during port hours that count as "rained ashore" on a typical day
 
   const API = {
     forecast: 'https://api.open-meteo.com/v1/forecast',
     archive: 'https://archive-api.open-meteo.com/v1/archive',
+    histForecast: 'https://historical-forecast-api.open-meteo.com/v1/forecast',
     marine: 'https://marine-api.open-meteo.com/v1/marine'
   };
 
@@ -152,6 +155,10 @@
     const yearSpan = +cruise.end.slice(0, 4) - startYear;
     const years = Array.from({ length: TYPICAL_YEARS }, (_, i) => lastFull - i);
     const cp = coordParams(locs);
+    // Port days with both times get a typical "rain while in port" figure; fetch hourly rain only for those spots.
+    const portLocs = [...new Set(cruise.days.filter(d => d.type === 'port' && parseClock(d.arrive) != null && parseClock(d.depart) != null).map(d => d._loc))];
+    const portIdx = new Map(portLocs.map((l, k) => [l, k]));
+    const pcp = coordParams(portLocs.map(l => locs[l]));
 
     const perYear = await Promise.all(years.map(async y => {
       const s = addDays(withYear(cruise.start, y), -TYPICAL_WINDOW);
@@ -169,13 +176,19 @@
       const sstReq = y >= SST_FIRST_YEAR
         ? om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' }).catch(() => null)
         : Promise.resolve(null);
-      const [w, m, sst] = await Promise.all([wxReq, seaReq, sstReq]);
-      return { y, w, m, sst };
+      const uvReq = y >= UV_FIRST_YEAR
+        ? om(API.histForecast, { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'uv_index_max' }).catch(() => null)
+        : Promise.resolve(null);
+      const rainReq = portLocs.length
+        ? om(API.archive, { ...pcp, start_date: s, end_date: e, timezone: 'auto', hourly: 'precipitation', precipitation_unit: 'inch' }).catch(() => null)
+        : Promise.resolve(null);
+      const [w, m, sst, uv, rain] = await Promise.all([wxReq, seaReq, sstReq, uvReq, rainReq]);
+      return { y, w, m, sst, uv, rain };
     }));
 
     const out = cruise.days.map(day => {
-      const acc = { hi: [], lo: [], wind: [], wave: [], sst: [], feels: [], rh: [], dx: 0, dy: 0, sunrise: null, sunset: null, rainDays: 0, n: 0 };
-      perYear.forEach(({ y, w, m, sst }) => {
+      const acc = { uv: [], portWet: 0, portN: 0, hi: [], lo: [], wind: [], wave: [], sst: [], feels: [], rh: [], dx: 0, dy: 0, sunrise: null, sunset: null, rainDays: 0, n: 0 };
+      perYear.forEach(({ y, w, m, sst, uv, rain }) => {
         const offsetYear = y + (+day.date.slice(0, 4) - startYear);
         const center = withYear(day.date, offsetYear);
         const wl = w?.[day._loc], ml = m?.[day._loc];
@@ -199,6 +212,13 @@
             }
           }
           if (ml) acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
+          if (uv?.[day._loc]) { const u = uv[day._loc]; acc.uv.push(pick(u, dailyIndex(u), 'uv_index_max', dt)); }
+          if (rain && portIdx.has(day._loc)) {
+            const hrs = hourlyFor(rain[portIdx.get(day._loc)], 'precipitation', dt);
+            const a = parseClock(day.arrive), dp = parseClock(day.depart);
+            const inPort = hrs.filter(x => x.h >= Math.floor(a) && x.h < Math.ceil(dp));
+            if (inPort.length) { acc.portN++; if (inPort.reduce((t2, x) => t2 + x.v, 0) >= PORT_RAIN_IN) acc.portWet++; }
+          }
           if (sst?.[day._loc]) acc.sst.push(mean(hourlyFor(sst[day._loc], 'sea_surface_temperature', dt).map(x => x.v)));
         }
       });
@@ -208,6 +228,8 @@
         wind: round(median(acc.wind)),
         rainPct: acc.n ? Math.round(100 * acc.rainDays / acc.n) : null,
         sst: round(median(acc.sst)),
+        uv: round(median(acc.uv)),
+        portRain: acc.portN ? Math.round(100 * acc.portWet / acc.portN) : null,
         feels: round(median(acc.feels)), rh: round(median(acc.rh)),
         wdir: (acc.dx || acc.dy) ? (Math.atan2(acc.dx, acc.dy) * 180 / Math.PI + 360) % 360 : null,
         sunrise: acc.sunrise, sunset: acc.sunset,
@@ -415,9 +437,10 @@
       dir: compass(lv.wdir ?? t.wdir),
       sunrise: clock(lv.sunrise ?? t.sunrise),
       sunset: clock(lv.sunset ?? t.sunset),
-      uv: src !== 'typical' && lv.uv != null ? Math.round(lv.uv) : null,
+      uv: lv.uv != null ? Math.round(lv.uv) : (t.uv ?? null),
       sst: lv.sst ?? t.sst ?? null,
-      portRain: src === 'forecast' ? lv.portRain ?? null : null,
+      portRain: src === 'forecast' ? lv.portRain ?? null : (src === 'typical' ? t.portRain ?? null : null),
+      portRainTypical: src === 'typical',
       total: cruise.days.length
     };
   }
@@ -445,7 +468,7 @@
           <div class="stat"><span class="val">${m.dir ? m.dir + ' ' : ''}${m.wind ?? '—'} kn${m.mph != null ? ` <small>(${m.mph} mph)</small>` : ''}${m.gust ? ` <small>gusts ${m.gust}</small>` : ''}</span><span class="lbl">Wind</span></div>
           <div class="stat"><span class="val">${m.waveFt ?? '—'}${m.waveFt != null ? ' ft' : ''} ${m.sea ? `<span class="sea ${m.sea[0]}">${m.sea[1]}</span>` : ''}</span><span class="lbl">Seas${m.waveTypical ? ' (typical)' : ''}</span></div>
         </div>
-        ${m.portRain != null ? `<p class="ashore">☔ ${m.portRain}% chance of rain while in port (${esc(day.arrive)} – ${esc(day.depart)})</p>` : ''}
+        ${m.portRain != null ? `<p class="ashore">☔ ${m.portRainTypical ? `Rained while in port on ${m.portRain}% of past days` : `${m.portRain}% chance of rain while in port`} (${esc(day.arrive)} – ${esc(day.depart)})</p>` : ''}
         ${(m.feels != null || m.sunrise || m.uv != null || m.sst != null) ? `<p class="extra">${[
           m.feels != null ? `Feels like ${m.feels}°` : '',
           m.rh != null ? `${m.rh}% humidity` : '',
@@ -469,7 +492,7 @@
     else lines.push(`📍 ${d.name}${times(d) ? ` · ${times(d)}` : ''}${d.note ? ` · ${d.note}` : ''}`);
     if (m.hi != null) lines.push(`🌡️ High ${m.hi}°F (${toC(m.hi)}°C) / Low ${m.lo}°F (${toC(m.lo)}°C)`);
     if (m.label) lines.push(`${m.icon || '⛅'} Sky: ${m.label}${m.rain != null && m.src === 'forecast' ? ` · ☔ ${m.rain} chance of rain` : ''}`);
-    if (m.portRain != null) lines.push(`🏝️ While in port (${d.arrive} – ${d.depart}): ${m.portRain}% chance of rain`);
+    if (m.portRain != null) lines.push(`🏝️ While in port (${d.arrive} – ${d.depart}): ${m.portRainTypical ? `rain on ${m.portRain}% of past days` : `${m.portRain}% chance of rain`}`);
     if (m.feels != null) lines.push(`😎 Feels like: ${m.feels}°F (${toC(m.feels)}°C)${m.rh != null ? ` · 💧 ${m.rh}% humidity` : ''}`);
     if (m.uv != null || m.sst != null) lines.push([m.uv != null ? `🕶️ UV ${m.uv} (${uvWord(m.uv)})` : '', m.sst != null ? `🏊 Water ${m.sst}°F (${toC(m.sst)}°C)` : ''].filter(Boolean).join(' · '));
     if (m.sunrise) lines.push(`🌅 Sunrise ${m.sunrise} · 🌇 Sunset ${m.sunset}`);
