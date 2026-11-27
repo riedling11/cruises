@@ -154,7 +154,7 @@ Every day card is built from one view model (function `dayModel()`). The card (`
 |---|---|---|
 | **Copy today's post** (top of Voyage weather) | `waDay()` | During the cruise, today's itinerary day. Before the cruise, day 1. After it, the last day. |
 | **Copy** (on each day card) | `waDay()` | That day. |
-| **Copy full voyage** | `waVoyage()` | One two-line entry per day: date and place, then sky, high/low, wind, seas. Entries using all-typical values are marked _(typical)_; forecast days whose seas fall back to typical are marked _(typical seas)_, each with a matching footnote. Today is marked ⬅️ today. |
+| **Copy full voyage** | `waVoyage()` | One entry per day: date and place; sky, high/low, wind, seas; then, when available, port-hours rain chance, UV and water temperature. Entries using all-typical values are marked _(typical)_; forecast days whose seas fall back to typical are marked _(typical seas)_, each with a matching footnote. Today is marked ⬅️ today. |
 
 Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lines with no data are left out:
 

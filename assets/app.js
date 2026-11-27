@@ -501,6 +501,11 @@
       else if (m.waveTypical) { tag = ' _(typical seas)_'; anyTypicalSeas = true; }
       lines.push(`*${short(d.date)} · ${place}*${m.isToday ? ' ⬅️ today' : ''}`);
       lines.push(`${parts.join(' · ') || 'No data yet'}${tag}`);
+      const more = [];
+      if (m.portRain != null) more.push(`🏝️ ${m.portRain}% rain in port`);
+      if (m.uv != null) more.push(`🕶️ UV ${m.uv}`);
+      if (m.sst != null) more.push(`🏊 ${m.sst}°F water`);
+      if (more.length) lines.push(more.join(' · '));
     });
     lines.push('');
     if (anyTypical) lines.push('_Typical = 10-year normal; switches to the live forecast about 2 weeks out._');
