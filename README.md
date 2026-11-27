@@ -133,12 +133,12 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 ## Live position (AIS)
 
 - **Track button:** opens the ship on MarineTraffic (by IMO) in a new tab. Shown whenever the cruise has an `imo`.
-- **Embedded live map:** shown from the day before sailing to the day after it ends, when the cruise has an `imo`. It is VesselFinder's free embeddable map, loaded inside a sandboxed `<iframe srcdoc>` so their script can't touch the page. Settings passed to `https://www.vesselfinder.com/aismap.js`: `width='100%'`, `height='320'`, `names=true`, `imo=<imo>`, `show_track=true` (last 24 hours of track).
+- **Embedded live map:** shown from the day before sailing to the day after it ends, when the cruise has an `imo`. It is VesselFinder's free embeddable map, loaded inside an `<iframe srcdoc>` with `sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"` (no `allow-same-origin`), so their script runs in an isolated origin and can't touch the page. Settings passed to `https://www.vesselfinder.com/aismap.js`: `width='100%'`, `height='320'`, `names=true`, `imo=<imo>`, `show_track=true` (last 24 hours of track).
 - Both use land-based AIS, so positions far offshore can be hours old. The estimated position below fills that gap.
 
 ## Estimated ship position
 
-Shown from the day before sailing to the day after it ends. It's estimated from the itinerary, not tracked; the VesselFinder button is the real position.
+Shown from the day before sailing to the day after it ends. It's estimated from the itinerary, not tracked; the live map and Track button show the real (AIS) position.
 
 - **Time zones:** one Open-Meteo forecast request (`forecast_days=1`, `timezone=auto`) for every location supplies each location's `utc_offset_seconds`. Itinerary times are treated as local time at that location.
 - **Waypoints** (function `waypoints()`): ports contribute an arrival and/or departure point at their listed times. A port with no times gets noon. Sea days contribute their position at local noon.
