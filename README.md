@@ -133,7 +133,7 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 ## Live position (AIS)
 
 - **Track button:** opens the ship on MarineTraffic (by IMO) in a new tab. Shown whenever the cruise has an `imo`.
-- **Embedded live map:** shown from the day before sailing to the day after it ends, when the cruise has an `imo`. It is VesselFinder's free embeddable map, loaded inside an `<iframe srcdoc>` with `sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"` (no `allow-same-origin`), so their script runs in an isolated origin and can't touch the page. Settings passed to `https://www.vesselfinder.com/aismap.js`: `width='100%'`, `height='320'`, `names=true`, `imo=<imo>`, `show_track=true` (last 24 hours of track).
+- **Embedded live map:** shown from the day before sailing to the day after it ends, when the cruise has an `imo`. It is VesselFinder's free embeddable map, framed directly from `https://www.vesselfinder.com/aismap?width=100%25&height=320&names=true&imo=<imo>&track=true&fleet=false&clicktoact=false&store_pos=false&ra=<page url>` (the URL their documented `aismap.js` embed script builds). `track=true` draws the last 24 hours of track. The iframe is cross-origin with `sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"`; `allow-same-origin` here refers to VesselFinder's own origin, which their map needs, and gives it no access to this page.
 - Both use land-based AIS, so positions far offshore can be hours old. The estimated position below fills that gap.
 
 ## Estimated ship position

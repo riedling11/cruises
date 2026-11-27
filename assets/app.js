@@ -620,8 +620,8 @@
 
       ${liveWindow && cruise.imo ? `<section class="live-map">
         <h2>Live position</h2>
-        <iframe title="Live AIS position of ${esc(cruise.ship)}" loading="lazy" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-          srcdoc="${esc(`<!DOCTYPE html><html><body style='margin:0'><script>var width='100%';var height='320';var names=true;var imo='${String(cruise.imo).replace(/\D/g, '')}';var show_track=true;<\/script><script src='https://www.vesselfinder.com/aismap.js'><\/script></body></html>`)}"></iframe>
+        <iframe title="Live AIS position of ${esc(cruise.ship)}" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          src="https://www.vesselfinder.com/aismap?width=100%25&height=320&names=true&imo=${encodeURIComponent(String(cruise.imo).replace(/\D/g, ''))}&track=true&fleet=false&clicktoact=false&store_pos=false&ra=${encodeURIComponent(location.origin + location.pathname)}"></iframe>
         <p class="note-sm">Live AIS from VesselFinder. Far from land the position can be a few hours old. The route map below shows the estimated position.</p>
       </section>` : ''}
 
