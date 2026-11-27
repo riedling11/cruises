@@ -81,7 +81,8 @@ Constants at the top of `app.js`:
 | `RECENT_BACK` | `60` | Days back served by the forecast API before switching to the archive API. |
 | `TYPICAL_YEARS` | `10` | Years of history used for typical values. |
 | `TYPICAL_WINDOW` | `3` | ± days around each date that count toward typical. |
-| `CACHE_VERSION` | `v2` | Bump to invalidate every viewer's cached typical values. |
+| `CACHE_VERSION` | `v3` |
+| `SST_FIRST_YEAR` | `2023` | First year with water-temperature history. | Bump to invalidate every viewer's cached typical values. |
 
 ## Typical (climatology) calculation
 
@@ -105,7 +106,7 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 
 - **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset`. The archive API omits `precipitation_probability_max`.
 - **Hourly fields:** `precipitation_probability` (forecast only), used for the port-hours rain chance below.
-- **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. The typical calculation requests the same hourly field and takes the median of the daily means.
+- **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. For typical days, water-temperature history only exists from 2023 onward (`SST_FIRST_YEAR`) and not in the ERA5-Ocean model, so the typical calculation makes a separate marine request (default model, `hourly=sea_surface_temperature`) for each history year from 2023 onward and takes the median of the daily means. Typical water temperature is therefore based on about three years, not ten.
 - **UV:** `uv_index_max`, forecast days only, rounded. Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
 - **Port-hours rain** (function `portRain()`, forecast port days that have both `arrive` and `depart`): the highest hourly `precipitation_probability` from the arrival hour (rounded down) up to, but not including, the departure hour (rounded up). Shown on the card as "☔ N% chance of rain while in port (arrive – depart)" and in the WhatsApp day post as "🏝️ While in port …".
 - **Extra detail:** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days use the typical values; UV and port-hours rain are forecast-only.

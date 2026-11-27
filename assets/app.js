@@ -6,7 +6,8 @@
   const RECENT_BACK = 60;      // days back the forecast API can serve as "recorded"
   const TYPICAL_YEARS = 10;    // years of history for "typical"
   const TYPICAL_WINDOW = 3;    // ± days around each date for "typical"
-  const CACHE_VERSION = 'v2';
+  const CACHE_VERSION = 'v3';
+  const SST_FIRST_YEAR = 2023;  // first year with sea-surface temperature history
 
   const API = {
     forecast: 'https://api.open-meteo.com/v1/forecast',
@@ -160,17 +161,21 @@
         daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,apparent_temperature_max,relative_humidity_2m_mean,wind_direction_10m_dominant,sunrise,sunset',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null);
-      const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' };
+      const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' };
       const seaReq = om(API.marine, { ...marineBase, models: 'era5_ocean' })
         .catch(() => om(API.marine, marineBase))
         .catch(() => null);
-      const [w, m] = await Promise.all([wxReq, seaReq]);
-      return { y, w, m };
+      // Water-temperature history only exists from SST_FIRST_YEAR, and not in the ERA5-Ocean model.
+      const sstReq = y >= SST_FIRST_YEAR
+        ? om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' }).catch(() => null)
+        : Promise.resolve(null);
+      const [w, m, sst] = await Promise.all([wxReq, seaReq, sstReq]);
+      return { y, w, m, sst };
     }));
 
     const out = cruise.days.map(day => {
       const acc = { hi: [], lo: [], wind: [], wave: [], sst: [], feels: [], rh: [], dx: 0, dy: 0, sunrise: null, sunset: null, rainDays: 0, n: 0 };
-      perYear.forEach(({ y, w, m }) => {
+      perYear.forEach(({ y, w, m, sst }) => {
         const offsetYear = y + (+day.date.slice(0, 4) - startYear);
         const center = withYear(day.date, offsetYear);
         const wl = w?.[day._loc], ml = m?.[day._loc];
@@ -193,10 +198,8 @@
               if (p != null) { acc.n++; if (p >= 0.1) acc.rainDays++; }
             }
           }
-          if (ml) {
-            acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
-            acc.sst.push(mean(hourlyFor(ml, 'sea_surface_temperature', dt).map(x => x.v)));
-          }
+          if (ml) acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
+          if (sst?.[day._loc]) acc.sst.push(mean(hourlyFor(sst[day._loc], 'sea_surface_temperature', dt).map(x => x.v)));
         }
       });
       const waveM = median(acc.wave);
