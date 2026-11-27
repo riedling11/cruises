@@ -81,7 +81,7 @@ Constants at the top of `app.js`:
 | `RECENT_BACK` | `60` | Days back served by the forecast API before switching to the archive API. |
 | `TYPICAL_YEARS` | `10` | Years of history used for typical values. |
 | `TYPICAL_WINDOW` | `3` | ± days around each date that count toward typical. |
-| `CACHE_VERSION` | `v1` | Bump to invalidate every viewer's cached typical values. |
+| `CACHE_VERSION` | `v2` | Bump to invalidate every viewer's cached typical values. |
 
 ## Typical (climatology) calculation
 
@@ -89,13 +89,15 @@ Function `loadTypical()`:
 
 - **Years:** the 10 full years before the cruise year, or before the current year if that is earlier.
 - **Requests:** one Archive API request and one Marine API request per year. Every unique location goes into a single request (comma-separated `latitude`/`longitude`), and the date range is cruise `start − 3` to `end + 3`, moved into that year. Marine history is requested with `models=era5_ocean`, retried without the model parameter if that fails.
-- **Archive request parameters:** `daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max`, `temperature_unit=fahrenheit`, `wind_speed_unit=kn`, `precipitation_unit=inch`, `timezone=auto`.
+- **Archive request parameters:** `daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,apparent_temperature_max,relative_humidity_2m_mean,wind_direction_10m_dominant,sunrise,sunset`, `temperature_unit=fahrenheit`, `wind_speed_unit=kn`, `precipitation_unit=inch`, `timezone=auto`.
 - **Marine request parameters:** `daily=wave_height_max`, `timezone=auto`.
 - **Per day:** collects every value from the same calendar date ±3 days across all 10 years (up to 70 samples) at that day's location, then:
-  - high, low, wind, wave height: median of the samples
+  - high, low, wind, wave height, feels-like, humidity, water temperature: median of the samples
+  - wind direction: vector mean of the daily dominant directions, shown as an 8-point compass
+  - sunrise/sunset: the most recent year's value for the same calendar date
   - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
   - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
-- **Cache:** the result is stored in `localStorage` under `typ:v1:<slug>:<itinerary fingerprint>`. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
+- **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
 
 ## Live / recorded calculation
 
@@ -106,7 +108,7 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 - **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. The typical calculation requests the same hourly field and takes the median of the daily means.
 - **UV:** `uv_index_max`, forecast days only, rounded. Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
 - **Port-hours rain** (function `portRain()`, forecast port days that have both `arrive` and `depart`): the highest hourly `precipitation_probability` from the arrival hour (rounded down) up to, but not including, the departure hour (rounded up). Shown on the card as "☔ N% chance of rain while in port (arrive – depart)" and in the WhatsApp day post as "🏝️ While in port …".
-- **Extra detail (forecast and recorded days only):** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days don't have them.
+- **Extra detail:** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days use the typical values; UV and port-hours rain are forecast-only.
 - **Units:** °F, knots, inches. Wave height arrives in meters and is converted to feet (× 3.28084, one decimal).
 - **Rain display:** Forecast days show `precipitation_probability_max` as "Rain chance". Recorded days show `precipitation_sum` in inches.
 - **Sky label** (function `sky()`): Open-Meteo's daily `weather_code` is the worst hour of the day, so a single passing shower labels the day "Drizzle". The label is therefore built from both `weather_code` and `cloud_cover_mean`:

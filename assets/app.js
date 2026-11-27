@@ -6,7 +6,7 @@
   const RECENT_BACK = 60;      // days back the forecast API can serve as "recorded"
   const TYPICAL_YEARS = 10;    // years of history for "typical"
   const TYPICAL_WINDOW = 3;    // ± days around each date for "typical"
-  const CACHE_VERSION = 'v1';
+  const CACHE_VERSION = 'v2';
 
   const API = {
     forecast: 'https://api.open-meteo.com/v1/forecast',
@@ -157,7 +157,7 @@
       const e = addDays(withYear(cruise.end, y + yearSpan), TYPICAL_WINDOW);
       const wxReq = om(API.archive, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max',
+        daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,apparent_temperature_max,relative_humidity_2m_mean,wind_direction_10m_dominant,sunrise,sunset',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null);
       const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' };
@@ -169,7 +169,7 @@
     }));
 
     const out = cruise.days.map(day => {
-      const acc = { hi: [], lo: [], wind: [], wave: [], sst: [], rainDays: 0, n: 0 };
+      const acc = { hi: [], lo: [], wind: [], wave: [], sst: [], feels: [], rh: [], dx: 0, dy: 0, sunrise: null, sunset: null, rainDays: 0, n: 0 };
       perYear.forEach(({ y, w, m }) => {
         const offsetYear = y + (+day.date.slice(0, 4) - startYear);
         const center = withYear(day.date, offsetYear);
@@ -183,6 +183,12 @@
               acc.hi.push(hi);
               acc.lo.push(pick(wl, wi, 'temperature_2m_min', dt));
               acc.wind.push(pick(wl, wi, 'wind_speed_10m_max', dt));
+              acc.feels.push(pick(wl, wi, 'apparent_temperature_max', dt));
+              acc.rh.push(pick(wl, wi, 'relative_humidity_2m_mean', dt));
+              const wd = pick(wl, wi, 'wind_direction_10m_dominant', dt);
+              if (wd != null) { acc.dx += Math.sin(wd * Math.PI / 180); acc.dy += Math.cos(wd * Math.PI / 180); }
+              // Sun times barely move year to year: keep the most recent year's value for the exact date.
+              if (k === 0 && !acc.sunrise) { acc.sunrise = pick(wl, wi, 'sunrise', dt); acc.sunset = pick(wl, wi, 'sunset', dt); }
               const p = pick(wl, wi, 'precipitation_sum', dt);
               if (p != null) { acc.n++; if (p >= 0.1) acc.rainDays++; }
             }
@@ -199,6 +205,9 @@
         wind: round(median(acc.wind)),
         rainPct: acc.n ? Math.round(100 * acc.rainDays / acc.n) : null,
         sst: round(median(acc.sst)),
+        feels: round(median(acc.feels)), rh: round(median(acc.rh)),
+        wdir: (acc.dx || acc.dy) ? (Math.atan2(acc.dx, acc.dy) * 180 / Math.PI + 360) % 360 : null,
+        sunrise: acc.sunrise, sunset: acc.sunset,
         waveFt: waveM == null ? null : Math.round(waveM * 3.28084 * 10) / 10
       };
     });
@@ -398,11 +407,11 @@
       mph: wind == null ? null : Math.round(wind * 1.15078),
       gust: src !== 'typical' && lv.gust && lv.gust > (wind ?? 0) + 2 ? lv.gust : null,
       sea: seaState(waveFt),
-      feels: src !== 'typical' ? lv.feels ?? null : null,
-      rh: src !== 'typical' ? lv.rh ?? null : null,
-      dir: src !== 'typical' ? compass(lv.wdir) : '',
-      sunrise: src !== 'typical' ? clock(lv.sunrise) : '',
-      sunset: src !== 'typical' ? clock(lv.sunset) : '',
+      feels: lv.feels ?? t.feels ?? null,
+      rh: lv.rh ?? t.rh ?? null,
+      dir: compass(lv.wdir ?? t.wdir),
+      sunrise: clock(lv.sunrise ?? t.sunrise),
+      sunset: clock(lv.sunset ?? t.sunset),
       uv: src !== 'typical' && lv.uv != null ? Math.round(lv.uv) : null,
       sst: lv.sst ?? t.sst ?? null,
       portRain: src === 'forecast' ? lv.portRain ?? null : null,
