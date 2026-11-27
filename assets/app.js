@@ -599,7 +599,8 @@
     const today = localToday();
     const st = status(cruise, today);
     document.title = `${cruise.ship} · ${cruise.title}`;
-    const tracker = cruise.imo ? `https://www.vesselfinder.com/vessels/details/${encodeURIComponent(cruise.imo)}` : cruise.trackerUrl;
+    const tracker = cruise.imo ? `https://www.marinetraffic.com/en/ais/details/ships/imo:${encodeURIComponent(cruise.imo)}` : cruise.trackerUrl;
+    const liveWindow = diffDays(cruise.start, today) <= 1 && diffDays(today, cruise.end) <= 1;
 
     app.innerHTML = `
       <p class="back"><a href="./">← All cruises</a></p>
@@ -613,8 +614,15 @@
       <div id="storms"></div>
 
       ${tracker ? `<section class="card ship-now">
-        <div><h2>Where's the ship right now?</h2><p>Live AIS position from VesselFinder.</p></div>
+        <div><h2>Where's the ship right now?</h2><p>Live AIS position on MarineTraffic.</p></div>
         <a class="btn" href="${esc(tracker)}" target="_blank" rel="noopener">Track ${esc(cruise.ship)} →</a>
+      </section>` : ''}
+
+      ${liveWindow && cruise.imo ? `<section class="live-map">
+        <h2>Live position</h2>
+        <iframe title="Live AIS position of ${esc(cruise.ship)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+          srcdoc="${esc(`<!DOCTYPE html><html><body style='margin:0'><script>var width='100%';var height='320';var names=true;var imo='${String(cruise.imo).replace(/\D/g, '')}';var show_track=true;<\/script><script src='https://www.vesselfinder.com/aismap.js'><\/script></body></html>`)}"></iframe>
+        <p class="note-sm">Live AIS from VesselFinder. Far from land the position can be a few hours old. The route map below shows the estimated position.</p>
       </section>` : ''}
 
       <div id="map" class="map" role="img" aria-label="Route map"></div>

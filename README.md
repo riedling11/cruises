@@ -41,7 +41,7 @@ A static site, hosted on GitHub Pages, that shows day-by-day weather and sea con
 |---|---|---|
 | `title`, `line`, `ship` | yes | Display text. |
 | `start`, `end` | yes | `YYYY-MM-DD`. Drive the status pill and the date ranges for history lookups. |
-| `imo` | no | Ship's IMO number. Builds the "Track" link to `vesselfinder.com/vessels/details/<imo>`. If absent, `trackerUrl` is used instead, if present. |
+| `imo` | no | Ship's IMO number. Builds the "Track" button link to `marinetraffic.com/en/ais/details/ships/imo:<imo>` and the embedded live map. If absent, `trackerUrl` is used for the button instead, if present, and the live map is not shown. |
 | `photo` | no | Image URL or repo path (e.g. `assets/ship.jpg`) for the header background. Blank means a plain gradient. |
 | `days[]` | yes | One entry per calendar day, in order. |
 | `days[].type` | yes | `port` or `sea`. |
@@ -130,6 +130,12 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 - **Map:** Leaflet with OpenStreetMap tiles. A dashed line runs through every day's position in order. Ports are white dots, sea days small navy dots, and today's position is red.
 - **Home page:** loads `cruises/index.json`, then every listed cruise file. Cruises are split into Upcoming (end date today or later, soonest first) and Past voyages (most recent first).
 
+## Live position (AIS)
+
+- **Track button:** opens the ship on MarineTraffic (by IMO) in a new tab. Shown whenever the cruise has an `imo`.
+- **Embedded live map:** shown from the day before sailing to the day after it ends, when the cruise has an `imo`. It is VesselFinder's free embeddable map, loaded inside a sandboxed `<iframe srcdoc>` so their script can't touch the page. Settings passed to `https://www.vesselfinder.com/aismap.js`: `width='100%'`, `height='320'`, `names=true`, `imo=<imo>`, `show_track=true` (last 24 hours of track).
+- Both use land-based AIS, so positions far offshore can be hours old. The estimated position below fills that gap.
+
 ## Estimated ship position
 
 Shown from the day before sailing to the day after it ends. It's estimated from the itinerary, not tracked; the VesselFinder button is the real position.
@@ -204,4 +210,5 @@ Copying uses `navigator.clipboard.writeText`. If the browser blocks that, it fal
 | NOAA National Hurricane Center | Active storms (via the GitHub Action) | No key. Public data. |
 | unpkg.com (Leaflet 1.9.4) | Map library | None |
 | OpenStreetMap tiles | Map tiles | Attribution required (shown on the map) |
-| VesselFinder | Link only, never fetched | — |
+| MarineTraffic | Track button (link only) | — |
+| VesselFinder | Embedded live map during the cruise (`aismap.js` in an iframe) | Free embed, no key |
