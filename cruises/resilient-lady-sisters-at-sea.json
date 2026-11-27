@@ -1,0 +1,19 @@
+{
+  "title": "Sisters at Sea",
+  "line": "Virgin Voyages",
+  "ship": "Resilient Lady",
+  "imo": "9805348",
+  "start": "2027-02-14",
+  "end": "2027-02-21",
+  "photo": "",
+  "days": [
+    { "date": "2027-02-14", "type": "port", "name": "Miami, Florida", "lat": 25.778, "lon": -80.177, "depart": "5:00 PM", "note": "Embark" },
+    { "date": "2027-02-15", "type": "port", "name": "Freeport, Grand Bahama", "lat": 26.520, "lon": -78.770, "arrive": "8:00 AM", "depart": "5:00 PM" },
+    { "date": "2027-02-16", "type": "sea", "name": "Florida Straits", "lat": 24.0, "lon": -83.5 },
+    { "date": "2027-02-17", "type": "sea", "name": "Gulf of Mexico", "lat": 23.0, "lon": -86.5 },
+    { "date": "2027-02-18", "type": "port", "name": "Progreso, Mexico", "lat": 21.330, "lon": -89.670, "arrive": "9:00 AM", "depart": "6:00 PM" },
+    { "date": "2027-02-19", "type": "sea", "name": "Gulf of Mexico", "lat": 23.6, "lon": -85.5 },
+    { "date": "2027-02-20", "type": "port", "name": "The Beach Club at Bimini", "lat": 25.730, "lon": -79.300, "arrive": "9:00 AM", "depart": "6:00 PM" },
+    { "date": "2027-02-21", "type": "port", "name": "Miami, Florida", "lat": 25.778, "lon": -80.177, "arrive": "6:30 AM", "note": "Disembark" }
+  ]
+}
