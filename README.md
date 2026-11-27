@@ -81,7 +81,8 @@ Constants at the top of `app.js`:
 | `RECENT_BACK` | `60` | Days back served by the forecast API before switching to the archive API. |
 | `TYPICAL_YEARS` | `10` | Years of history used for typical values. |
 | `TYPICAL_WINDOW` | `3` | ± days around each date that count toward typical. |
-| `CACHE_VERSION` | `v4` |
+| `CACHE_VERSION` | `v5` |
+| `CACHE_DAYS` | `7` | Days a viewer's cached typical values are reused. |
 | `SST_FIRST_YEAR` | `2023` | First year with water-temperature history. |
 | `UV_FIRST_YEAR` | `2022` | First year with UV history. |
 | `PORT_RAIN_IN` | `0.02` | Inches of rain during port hours that count as a wet port day (typical only). | Bump to invalidate every viewer's cached typical values. |
@@ -102,7 +103,7 @@ Function `loadTypical()`:
   - rain while in port (port days with both `arrive` and `depart`): one extra Archive API request per year for just those port locations, `hourly=precipitation` in inches. For each sample day, precipitation is summed over the port hours (same hour window as the forecast version). The figure is the percentage of sample days where that sum is at least 0.02 in (`PORT_RAIN_IN`). Shown as "A shower while in port on N% of past days" on the card, "a shower on N% of past days" in the WhatsApp day post and "showers in port N% of days" in the voyage post. This counts brief showers, so it can be well above the "Rainy days" figure, which counts days with at least 0.1 in.
   - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
   - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
-- **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
+- **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`, with a timestamp, and reused for `CACHE_DAYS` (7) days. It is only stored when temperatures, wave heights and UV all came back, so a partial load (for example after a rate-limit refusal) is retried on the next visit. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
 
 ## Live / recorded calculation
 

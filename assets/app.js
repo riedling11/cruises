@@ -6,7 +6,8 @@
   const RECENT_BACK = 60;      // days back the forecast API can serve as "recorded"
   const TYPICAL_YEARS = 10;    // years of history for "typical"
   const TYPICAL_WINDOW = 3;    // ± days around each date for "typical"
-  const CACHE_VERSION = 'v4';
+  const CACHE_VERSION = 'v5';
+  const CACHE_DAYS = 7;          // typical values are re-fetched after this many days
   const SST_FIRST_YEAR = 2023;  // first year with sea-surface temperature history
   const UV_FIRST_YEAR = 2022;   // first year with UV history (historical forecast API)
   const PORT_RAIN_IN = 0.02;    // inches during port hours that count as "rained ashore" on a typical day
@@ -147,7 +148,7 @@
   async function loadTypical(cruise, locs) {
     const cacheKey = `typ:${CACHE_VERSION}:${slug}:${cruise.days.map(d => d.date + d.lat + d.lon).join('|')}`;
     const cached = cacheGet(cacheKey);
-    if (cached) return cached;
+    if (cached && cached.at && Date.now() - cached.at < CACHE_DAYS * 864e5) return cached.data;
 
     const startYear = +cruise.start.slice(0, 4);
     const thisYear = new Date().getFullYear();
@@ -237,7 +238,8 @@
       };
     });
 
-    if (out.some(t => t.hi != null)) cacheSet(cacheKey, out);
+    // Only cache a complete result, so a rate-limited or failed request isn't remembered for a week.
+    if (out.some(t => t.hi != null) && out.some(t => t.waveFt != null) && out.some(t => t.uv != null)) cacheSet(cacheKey, { at: Date.now(), data: out });
     return out;
   }
 
