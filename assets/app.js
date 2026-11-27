@@ -468,7 +468,7 @@
           <div class="stat"><span class="val">${m.dir ? m.dir + ' ' : ''}${m.wind ?? '—'} kn${m.mph != null ? ` <small>(${m.mph} mph)</small>` : ''}${m.gust ? ` <small>gusts ${m.gust}</small>` : ''}</span><span class="lbl">Wind</span></div>
           <div class="stat"><span class="val">${m.waveFt ?? '—'}${m.waveFt != null ? ' ft' : ''} ${m.sea ? `<span class="sea ${m.sea[0]}">${m.sea[1]}</span>` : ''}</span><span class="lbl">Seas${m.waveTypical ? ' (typical)' : ''}</span></div>
         </div>
-        ${m.portRain != null ? `<p class="ashore">☔ ${m.portRainTypical ? `Rained while in port on ${m.portRain}% of past days` : `${m.portRain}% chance of rain while in port`} (${esc(day.arrive)} – ${esc(day.depart)})</p>` : ''}
+        ${m.portRain != null ? `<p class="ashore">☔ ${m.portRainTypical ? `A shower while in port on ${m.portRain}% of past days` : `${m.portRain}% chance of rain while in port`} (${esc(day.arrive)} – ${esc(day.depart)})</p>` : ''}
         ${(m.feels != null || m.sunrise || m.uv != null || m.sst != null) ? `<p class="extra">${[
           m.feels != null ? `Feels like ${m.feels}°` : '',
           m.rh != null ? `${m.rh}% humidity` : '',
@@ -492,7 +492,7 @@
     else lines.push(`📍 ${d.name}${times(d) ? ` · ${times(d)}` : ''}${d.note ? ` · ${d.note}` : ''}`);
     if (m.hi != null) lines.push(`🌡️ High ${m.hi}°F (${toC(m.hi)}°C) / Low ${m.lo}°F (${toC(m.lo)}°C)`);
     if (m.label) lines.push(`${m.icon || '⛅'} Sky: ${m.label}${m.rain != null && m.src === 'forecast' ? ` · ☔ ${m.rain} chance of rain` : ''}`);
-    if (m.portRain != null) lines.push(`🏝️ While in port (${d.arrive} – ${d.depart}): ${m.portRainTypical ? `rain on ${m.portRain}% of past days` : `${m.portRain}% chance of rain`}`);
+    if (m.portRain != null) lines.push(`🏝️ While in port (${d.arrive} – ${d.depart}): ${m.portRainTypical ? `a shower on ${m.portRain}% of past days` : `${m.portRain}% chance of rain`}`);
     if (m.feels != null) lines.push(`😎 Feels like: ${m.feels}°F (${toC(m.feels)}°C)${m.rh != null ? ` · 💧 ${m.rh}% humidity` : ''}`);
     if (m.uv != null || m.sst != null) lines.push([m.uv != null ? `🕶️ UV ${m.uv} (${uvWord(m.uv)})` : '', m.sst != null ? `🏊 Water ${m.sst}°F (${toC(m.sst)}°C)` : ''].filter(Boolean).join(' · '));
     if (m.sunrise) lines.push(`🌅 Sunrise ${m.sunrise} · 🌇 Sunset ${m.sunset}`);
@@ -537,7 +537,7 @@
       lines.push(`*${short(d.date)} · ${place}*${m.isToday ? ' ⬅️ today' : ''}`);
       lines.push(`${parts.join(' · ') || 'No data yet'}${tag}`);
       const more = [];
-      if (m.portRain != null) more.push(`🏝️ ${m.portRain}% rain in port`);
+      if (m.portRain != null) more.push(m.portRainTypical ? `🏝️ showers in port ${m.portRain}% of days` : `🏝️ ${m.portRain}% rain chance in port`);
       if (m.uv != null) more.push(`🕶️ UV ${m.uv}`);
       if (m.sst != null) more.push(`🏊 ${m.sst}°F water`);
       if (more.length) lines.push(more.join(' · '));

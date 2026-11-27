@@ -99,7 +99,7 @@ Function `loadTypical()`:
   - wind direction: vector mean of the daily dominant directions, shown as an 8-point compass
   - sunrise/sunset: the most recent year's value for the same calendar date
   - UV: from `historical-forecast-api.open-meteo.com/v1/forecast` (`daily=uv_index_max`), one request per history year from 2022 onward (`UV_FIRST_YEAR`), median of the samples. The archive API has no UV.
-  - rain while in port (port days with both `arrive` and `depart`): one extra Archive API request per year for just those port locations, `hourly=precipitation` in inches. For each sample day, precipitation is summed over the port hours (same hour window as the forecast version). The figure is the percentage of sample days where that sum is at least 0.02 in (`PORT_RAIN_IN`). Shown as "Rained while in port on N% of past days" on the card and "rain on N% of past days" in the WhatsApp post.
+  - rain while in port (port days with both `arrive` and `depart`): one extra Archive API request per year for just those port locations, `hourly=precipitation` in inches. For each sample day, precipitation is summed over the port hours (same hour window as the forecast version). The figure is the percentage of sample days where that sum is at least 0.02 in (`PORT_RAIN_IN`). Shown as "A shower while in port on N% of past days" on the card, "a shower on N% of past days" in the WhatsApp day post and "showers in port N% of days" in the voyage post. This counts brief showers, so it can be well above the "Rainy days" figure, which counts days with at least 0.1 in.
   - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
   - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
 - **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
@@ -170,7 +170,7 @@ Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lin
 📍 <port> · <arrive – depart> · <note>      or   📍 Sea day 🌊 <sea area> (approx.)
 🌡️ High 84°F (29°C) / Low 79°F (26°C)
 ⛅ Sky: <label> · ☔ <n>% chance of rain          (rain chance on forecast days only)
-🏝️ While in port (9:00 AM – 6:00 PM): 45% chance of rain   (typical: "rain on N% of past days")
+🏝️ While in port (9:00 AM – 6:00 PM): 45% chance of rain   (typical: "a shower on N% of past days")
 😎 Feels like: 88°F (31°C) · 💧 74% humidity
 🕶️ UV 7 (high) · 🏊 Water 84°F (29°C)
 🌅 Sunrise 6:31am · 🌇 Sunset 5:40pm
