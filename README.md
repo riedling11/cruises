@@ -9,7 +9,7 @@ A static site, hosted on GitHub Pages, that shows day-by-day weather and sea con
 
 | Path | Purpose |
 |---|---|
-| `index.html` | Page shell. Loads Leaflet (map) from unpkg, then `assets/app.js`. Marked `noindex, nofollow`. |
+| `index.html` | Page shell. Loads Leaflet (map) from unpkg, then `assets/app.js`. Marked `noindex, nofollow`. The `?v=N` on the CSS and JS links is a cache-buster: increase it whenever either file changes, or browsers keep the old copy for up to 10 minutes. |
 | `assets/app.js` | All logic: routing, data fetches, the typical/forecast/recorded calculations, rendering. |
 | `assets/style.css` | Mobile-first styles, with automatic dark mode. |
 | `cruises/index.json` | The list of cruise slugs shown on the home page. |
