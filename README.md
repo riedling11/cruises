@@ -14,6 +14,9 @@ A static site, hosted on GitHub Pages, that shows day-by-day weather and sea con
 | `assets/style.css` | Mobile-first styles, with automatic dark mode. |
 | `cruises/index.json` | The list of cruise slugs shown on the home page. |
 | `cruises/<slug>.json` | One itinerary per cruise. This is the only file that changes per cruise. |
+| `data/storms.json` | Active tropical cyclones, refreshed by the GitHub Action below. Don't edit by hand. |
+| `scripts/normalize_storms.py` | Converts NHC's feed into `data/storms.json`. |
+| `.github/workflows/storms.yml` | GitHub Action that runs every 3 hours to refresh `data/storms.json`. |
 | `.nojekyll` | Tells GitHub Pages to serve the files as-is. |
 
 ## Cruise file (`cruises/<slug>.json`)
@@ -99,6 +102,10 @@ Function `loadTypical()`:
 Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). Each sends one weather request and one marine request covering all unique locations, with the date range set to the earliest and latest qualifying itinerary dates.
 
 - **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset`. The archive API omits `precipitation_probability_max`.
+- **Hourly fields:** `precipitation_probability` (forecast only), used for the port-hours rain chance below.
+- **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. The typical calculation requests the same hourly field and takes the median of the daily means.
+- **UV:** `uv_index_max`, forecast days only, rounded. Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
+- **Port-hours rain** (function `portRain()`, forecast port days that have both `arrive` and `depart`): the highest hourly `precipitation_probability` from the arrival hour (rounded down) up to, but not including, the departure hour (rounded up). Shown on the card as "☔ N% chance of rain while in port (arrive – depart)" and in the WhatsApp day post as "🏝️ While in port …".
 - **Extra detail (forecast and recorded days only):** feels-like (`apparent_temperature_max`), mean humidity, dominant wind direction converted to an 8-point compass (N, NE, … NW), and sunrise/sunset in the location's local time. These appear as a line under the stats on the day card and in the WhatsApp day post. Typical days don't have them.
 - **Units:** °F, knots, inches. Wave height arrives in meters and is converted to feet (× 3.28084, one decimal).
 - **Rain display:** Forecast days show `precipitation_probability_max` as "Rain chance". Recorded days show `precipitation_sum` in inches.
@@ -114,6 +121,30 @@ Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). E
 - **Status pill** (function `status()`): "Sails in N days" before departure, "Day X of Y" during the cruise (that day's card is outlined and marked Today), "Voyage complete" afterwards.
 - **Map:** Leaflet with OpenStreetMap tiles. A dashed line runs through every day's position in order. Ports are white dots, sea days small navy dots, and today's position is red.
 - **Home page:** loads `cruises/index.json`, then every listed cruise file. Cruises are split into Upcoming (end date today or later, soonest first) and Past voyages (most recent first).
+
+## Estimated ship position
+
+Shown from the day before sailing to the day after it ends. It's estimated from the itinerary, not tracked; the VesselFinder button is the real position.
+
+- **Time zones:** one Open-Meteo forecast request (`forecast_days=1`, `timezone=auto`) for every location supplies each location's `utc_offset_seconds`. Itinerary times are treated as local time at that location.
+- **Waypoints** (function `waypoints()`): ports contribute an arrival and/or departure point at their listed times. A port with no times gets noon. Sea days contribute their position at local noon.
+- **Position** (function `shipNow()`), recalculated every 5 minutes:
+  - between a port's arrival and departure: in port, "all aboard before <depart>"
+  - between any other two waypoints: straight-line interpolation by elapsed time, "At sea, heading to <next port> · arrives <day> <time>"
+  - up to 18 hours before the first departure: in port at the embarkation port
+  - up to 12 hours after the last arrival: "Arrived in <port>"
+  - otherwise: hidden
+- **Display:** a 🚢 marker on the map and a line under it.
+
+## Tropical storm alerts
+
+NHC's `CurrentStorms.json` can't be read from a browser (NHC doesn't allow cross-origin requests), so a GitHub Action keeps a copy in the repo.
+
+- **Action** (`.github/workflows/storms.yml`): runs every 3 hours at :23, and can be run manually from the Actions tab (Run workflow). It downloads `https://www.nhc.noaa.gov/CurrentStorms.json`, runs `scripts/normalize_storms.py`, and commits `data/storms.json` only if it changed. The normalized file contains only advisory data (no fetch timestamp), so quiet periods produce no commits. Each commit redeploys Pages.
+- **Normalized fields per storm:** `id, name, classification, intensityKt, pressureMb, lat, lon, movementDir, movementSpeedKt, advisoryUrl, lastUpdate`.
+- **Page check** (function `loadStorms()`): runs when today is no more than 21 days before the cruise starts and not after it ends. For each storm, the great-circle distance in nautical miles to every itinerary point is calculated, and the closest one is kept. Storms within 600 nm of the route show an orange banner under the header with the type (HU = Hurricane, TS = Tropical Storm, TD = Tropical Depression, and so on), name, wind, distance, nearest itinerary point and a link to the NHC advisory.
+- **WhatsApp:** each nearby storm adds a "⚠️ …" line to day posts and to the full-voyage post.
+- **Tuning:** `STORM_RADIUS_NM` (600) and `STORM_LOOKAHEAD_DAYS` (21) at the top of the storms section of `app.js`.
 
 ## WhatsApp posts
 
@@ -132,10 +163,13 @@ Day post format (WhatsApp renders `*text*` as bold and `_text_` as italics). Lin
 📍 <port> · <arrive – depart> · <note>      or   📍 Sea day 🌊 <sea area> (approx.)
 🌡️ High 84°F (29°C) / Low 79°F (26°C)
 ⛅ Sky: <label> · ☔ <n>% chance of rain          (rain chance on forecast days only)
+🏝️ While in port (9:00 AM – 6:00 PM): 45% chance of rain   (port days, forecast only)
 😎 Feels like: 88°F (31°C) · 💧 74% humidity
+🕶️ UV 7 (high) · 🏊 Water 84°F (29°C)
 🌅 Sunrise 6:31am · 🌇 Sunset 5:40pm
 💨 Wind: E 19 kt (22 mph / 35 km/h), gusts 25 kt
 🌊 Seas: 6.1 ft (1.9 m) · Moderate
+⚠️ <storm line, if any>                        (NHC)
 🔜 Tomorrow: Arriving in <NEXT PORT> <icon> <label>, <high>°F (<°C>), seas <ft> ft
 📅 Full trip forecast: <page link>
 ```
@@ -159,6 +193,7 @@ Copying uses `navigator.clipboard.writeText`. If the browser blocks that, it fal
 | Service | Used for | Key / limits |
 |---|---|---|
 | Open-Meteo (forecast, archive, marine) | All weather data | No key. Free for non-commercial use, attribution required (in the footer). |
+| NOAA National Hurricane Center | Active storms (via the GitHub Action) | No key. Public data. |
 | unpkg.com (Leaflet 1.9.4) | Map library | None |
 | OpenStreetMap tiles | Map tiles | Attribution required (shown on the map) |
 | VesselFinder | Link only, never fetched | — |

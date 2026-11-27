@@ -56,6 +56,23 @@
     return Array.isArray(j) ? j : [j];
   }
 
+  // Hourly values for one date: [{h: hour 0-23, v}] (times are the location's local time)
+  function hourlyFor(loc, field, date) {
+    const t = loc?.hourly?.time, v = loc?.hourly?.[field];
+    if (!t || !v) return [];
+    const out = [];
+    for (let k = 0; k < t.length; k++) if (t[k].startsWith(date) && v[k] != null) out.push({ h: +t[k].slice(11, 13), v: v[k] });
+    return out;
+  }
+  const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  // "8:00 AM" -> 8 ; "6:30 PM" -> 18.5
+  function parseClock(s) {
+    const m = /^(\d{1,2}):(\d{2})\s*([AP])M$/i.exec(String(s || '').trim());
+    if (!m) return null;
+    let h = +m[1] % 12; if (m[3].toUpperCase() === 'P') h += 12;
+    return h + (+m[2]) / 60;
+  }
+
   // Map date -> index for one location's daily block
   const dailyIndex = loc => { const m = new Map(); (loc?.daily?.time || []).forEach((t, i) => m.set(t, i)); return m; };
   const pick = (loc, idx, field, date) => { const i = idx.get(date); if (i == null) return null; const v = loc.daily[field]?.[i]; return v == null ? null : v; };
@@ -99,6 +116,8 @@
   const toC = f => f == null ? null : Math.round((f - 32) * 5 / 9);
   const clock = iso => { if (!iso) return ''; const [h, mi] = iso.slice(11, 16).split(':').map(Number); return `${((h + 11) % 12) + 1}:${pad(mi)}${h < 12 ? 'am' : 'pm'}`; };
 
+  const uvWord = u => u == null ? '' : u < 3 ? 'low' : u < 6 ? 'moderate' : u < 8 ? 'high' : u < 11 ? 'very high' : 'extreme';
+
   function seaState(ft) {
     if (ft == null) return null;
     if (ft < 4) return ['slight', 'Slight'];
@@ -141,7 +160,7 @@
         daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null);
-      const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' };
+      const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' };
       const seaReq = om(API.marine, { ...marineBase, models: 'era5_ocean' })
         .catch(() => om(API.marine, marineBase))
         .catch(() => null);
@@ -150,7 +169,7 @@
     }));
 
     const out = cruise.days.map(day => {
-      const acc = { hi: [], lo: [], wind: [], wave: [], rainDays: 0, n: 0 };
+      const acc = { hi: [], lo: [], wind: [], wave: [], sst: [], rainDays: 0, n: 0 };
       perYear.forEach(({ y, w, m }) => {
         const offsetYear = y + (+day.date.slice(0, 4) - startYear);
         const center = withYear(day.date, offsetYear);
@@ -168,7 +187,10 @@
               if (p != null) { acc.n++; if (p >= 0.1) acc.rainDays++; }
             }
           }
-          if (ml) acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
+          if (ml) {
+            acc.wave.push(pick(ml, mi, 'wave_height_max', dt));
+            acc.sst.push(mean(hourlyFor(ml, 'sea_surface_temperature', dt).map(x => x.v)));
+          }
         }
       });
       const waveM = median(acc.wave);
@@ -176,6 +198,7 @@
         hi: round(median(acc.hi)), lo: round(median(acc.lo)),
         wind: round(median(acc.wind)),
         rainPct: acc.n ? Math.round(100 * acc.rainDays / acc.n) : null,
+        sst: round(median(acc.sst)),
         waveFt: waveM == null ? null : Math.round(waveM * 3.28084 * 10) / 10
       };
     });
@@ -185,6 +208,16 @@
   }
 
   /* ---------- live / recorded ---------- */
+  // Highest hourly rain chance while the ship is alongside (arrive..depart). Port days with both times only.
+  function portRain(day, hours) {
+    if (day.type !== 'port' || !hours.length) return null;
+    const a = parseClock(day.arrive), d = parseClock(day.depart);
+    if (a == null || d == null) return null;
+    const inPort = hours.filter(x => x.h >= Math.floor(a) && x.h < Math.ceil(d));
+    if (!inPort.length) return null;
+    return Math.round(Math.max(...inPort.map(x => x.v)));
+  }
+
   async function loadLive(cruise, locs, dates) {
     if (!dates.length) return {};
     const cp = coordParams(locs);
@@ -192,10 +225,11 @@
     const [w, m] = await Promise.all([
       om(API.forecast, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset,cloud_cover_mean',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset,cloud_cover_mean,uv_index_max',
+        hourly: 'precipitation_probability',
         temperature_unit: 'fahrenheit', wind_speed_unit: 'kn', precipitation_unit: 'inch'
       }).catch(() => null),
-      om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' }).catch(() => null)
+      om(API.marine, { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' }).catch(() => null)
     ]);
     const res = {};
     cruise.days.forEach((day, i) => {
@@ -210,7 +244,9 @@
         wind: round(g('wind_speed_10m_max')), gust: round(g('wind_gusts_10m_max')),
         feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
         wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
-        cloud: g('cloud_cover_mean'),
+        cloud: g('cloud_cover_mean'), uv: g('uv_index_max'),
+        sst: ml ? round(mean(hourlyFor(ml, 'sea_surface_temperature', day.date).map(x => x.v))) : null,
+        portRain: portRain(day, wl ? hourlyFor(wl, 'precipitation_probability', day.date) : []),
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
@@ -221,7 +257,7 @@
     if (!dates.length) return {};
     const cp = coordParams(locs);
     const s = dates[0], e = dates[dates.length - 1];
-    const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max' };
+    const marineBase = { ...cp, start_date: s, end_date: e, timezone: 'auto', daily: 'wave_height_max', hourly: 'sea_surface_temperature', temperature_unit: 'fahrenheit' };
     const [w, m] = await Promise.all([
       om(API.archive, {
         ...cp, start_date: s, end_date: e, timezone: 'auto',
@@ -244,11 +280,77 @@
         feels: round(g('apparent_temperature_max')), rh: round(g('relative_humidity_2m_mean')),
         wdir: g('wind_direction_10m_dominant'), sunrise: g('sunrise'), sunset: g('sunset'),
         cloud: g('cloud_cover_mean'),
+        sst: ml ? round(mean(hourlyFor(ml, 'sea_surface_temperature', day.date).map(x => x.v))) : null,
         waveFt: wave == null ? null : Math.round(wave * 3.28084 * 10) / 10
       };
     });
     return res;
   }
+
+  /* ---------- estimated ship position ---------- */
+  // Itinerary times are port-local. Each day's UTC offset comes from Open-Meteo (timezone=auto).
+  function waypoints(cruise, offsets) {
+    const pts = [];
+    cruise.days.forEach((d, i) => {
+      const off = offsets[i] ?? -new Date().getTimezoneOffset() * 60;
+      const at = h => Date.parse(d.date + 'T00:00:00Z') + h * 3600e3 - off * 1000;
+      const base = { lat: d.lat, lon: d.lon, i };
+      if (d.type === 'sea') { pts.push({ ...base, t: at(12), kind: 'sea' }); return; }
+      const a = parseClock(d.arrive), dep = parseClock(d.depart);
+      if (a != null) pts.push({ ...base, t: at(a), kind: 'arrive' });
+      if (dep != null) pts.push({ ...base, t: at(dep), kind: 'depart' });
+      if (a == null && dep == null) pts.push({ ...base, t: at(12), kind: 'port' });
+    });
+    return pts.sort((x, y) => x.t - y.t);
+  }
+
+  function shipNow(cruise, pts, now) {
+    if (!pts.length) return null;
+    const first = pts[0], last = pts[pts.length - 1];
+    const name = p => cruise.days[p.i].name;
+    const wkday = p => toUTC(cruise.days[p.i].date).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+    if (now < first.t) {
+      if (now > first.t - 18 * 3600e3) return { lat: first.lat, lon: first.lon, text: `In port at ${name(first)} · departs ${cruise.days[first.i].depart}` };
+      return null;
+    }
+    if (now >= last.t) {
+      if (now < last.t + 12 * 3600e3) return { lat: last.lat, lon: last.lon, text: `Arrived in ${name(last)}` };
+      return null;
+    }
+    let k = 0;
+    while (k < pts.length - 1 && !(pts[k].t <= now && now < pts[k + 1].t)) k++;
+    const A = pts[k], B = pts[k + 1];
+    if (A.i === B.i && A.kind === 'arrive' && B.kind === 'depart') {
+      return { lat: A.lat, lon: A.lon, text: `In port at ${name(A)} · all aboard before ${cruise.days[A.i].depart}` };
+    }
+    const f = (now - A.t) / (B.t - A.t);
+    const next = pts.slice(k + 1).find(p => p.kind === 'arrive' || p.kind === 'port');
+    return {
+      lat: A.lat + (B.lat - A.lat) * f, lon: A.lon + (B.lon - A.lon) * f,
+      text: next ? `At sea, heading to ${name(next)} · arrives ${wkday(next)} ${cruise.days[next.i].arrive || ''}`.trim() : 'At sea'
+    };
+  }
+
+  /* ---------- tropical storms (NHC, copied into data/storms.json by a GitHub Action) ---------- */
+  const STORM_RADIUS_NM = 600;
+  const STORM_LOOKAHEAD_DAYS = 21;
+  const STORM_TYPES = { HU: 'Hurricane', TS: 'Tropical Storm', TD: 'Tropical Depression', STS: 'Subtropical Storm', SD: 'Subtropical Depression', PTC: 'Potential Tropical Cyclone', PC: 'Post-Tropical Cyclone', TY: 'Typhoon' };
+  function distNm(a, b) {
+    const R = 3440.065, r = x => x * Math.PI / 180;
+    const dLat = r(b.lat - a.lat), dLon = r(b.lon - a.lon);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  async function loadStorms(cruise, today) {
+    if (diffDays(cruise.end, today) < 0 || diffDays(cruise.start, today) > STORM_LOOKAHEAD_DAYS) return [];
+    const j = await getJSON('data/storms.json').catch(() => null);
+    return (j?.storms || []).map(st => {
+      let best = null;
+      cruise.days.forEach(d => { const dist = distNm(st, d); if (!best || dist < best.dist) best = { dist, d }; });
+      return { ...st, dist: Math.round(best.dist), near: best.d.type === 'sea' ? best.d.name : best.d.name.split(',')[0], type: STORM_TYPES[st.classification] || 'Tropical system' };
+    }).filter(st => st.dist <= STORM_RADIUS_NM).sort((a, b) => a.dist - b.dist);
+  }
+  const stormLine = st => `${st.type} ${st.name}${st.intensityKt ? ` (${st.intensityKt} kt winds)` : ''} is about ${st.dist} nm from the route near ${st.near}`;
 
   /* ---------- rendering ---------- */
   function status(cruise, today) {
@@ -301,6 +403,9 @@
       dir: src !== 'typical' ? compass(lv.wdir) : '',
       sunrise: src !== 'typical' ? clock(lv.sunrise) : '',
       sunset: src !== 'typical' ? clock(lv.sunset) : '',
+      uv: src !== 'typical' && lv.uv != null ? Math.round(lv.uv) : null,
+      sst: lv.sst ?? t.sst ?? null,
+      portRain: src === 'forecast' ? lv.portRain ?? null : null,
       total: cruise.days.length
     };
   }
@@ -328,9 +433,12 @@
           <div class="stat"><span class="val">${m.dir ? m.dir + ' ' : ''}${m.wind ?? '—'} kn${m.mph != null ? ` <small>(${m.mph} mph)</small>` : ''}${m.gust ? ` <small>gusts ${m.gust}</small>` : ''}</span><span class="lbl">Wind</span></div>
           <div class="stat"><span class="val">${m.waveFt ?? '—'}${m.waveFt != null ? ' ft' : ''} ${m.sea ? `<span class="sea ${m.sea[0]}">${m.sea[1]}</span>` : ''}</span><span class="lbl">Seas${m.waveTypical ? ' (typical)' : ''}</span></div>
         </div>
-        ${(m.feels != null || m.sunrise) ? `<p class="extra">${[
+        ${m.portRain != null ? `<p class="ashore">☔ ${m.portRain}% chance of rain while in port (${esc(day.arrive)} – ${esc(day.depart)})</p>` : ''}
+        ${(m.feels != null || m.sunrise || m.uv != null || m.sst != null) ? `<p class="extra">${[
           m.feels != null ? `Feels like ${m.feels}°` : '',
           m.rh != null ? `${m.rh}% humidity` : '',
+          m.uv != null ? `UV ${m.uv} (${uvWord(m.uv)})` : '',
+          m.sst != null ? `Water ${m.sst}°F${m.src === 'typical' ? ' (typical)' : ''}` : '',
           m.sunrise ? `Sunrise ${m.sunrise} · Sunset ${m.sunset}` : ''
         ].filter(Boolean).join(' · ')}</p>` : ''}
       </article>`;
@@ -341,7 +449,7 @@
   const shortPlace = d => d.type === 'sea' ? `At sea (${d.name}, approx.)` : d.name;
   const srcWord = { forecast: 'Forecast', recorded: 'Recorded', typical: 'Typical for this date' };
 
-  function waDay(cruise, m, next, url) {
+  function waDay(cruise, m, next, url, storms = []) {
     const d = m.day;
     const dateShort = toUTC(d.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
     const lines = [`🚢 *${cruise.ship} – Day ${m.i + 1} (${dateShort})*`];
@@ -349,11 +457,14 @@
     else lines.push(`📍 ${d.name}${times(d) ? ` · ${times(d)}` : ''}${d.note ? ` · ${d.note}` : ''}`);
     if (m.hi != null) lines.push(`🌡️ High ${m.hi}°F (${toC(m.hi)}°C) / Low ${m.lo}°F (${toC(m.lo)}°C)`);
     if (m.label) lines.push(`${m.icon || '⛅'} Sky: ${m.label}${m.rain != null && m.src === 'forecast' ? ` · ☔ ${m.rain} chance of rain` : ''}`);
+    if (m.portRain != null) lines.push(`🏝️ While in port (${d.arrive} – ${d.depart}): ${m.portRain}% chance of rain`);
     if (m.feels != null) lines.push(`😎 Feels like: ${m.feels}°F (${toC(m.feels)}°C)${m.rh != null ? ` · 💧 ${m.rh}% humidity` : ''}`);
+    if (m.uv != null || m.sst != null) lines.push([m.uv != null ? `🕶️ UV ${m.uv} (${uvWord(m.uv)})` : '', m.sst != null ? `🏊 Water ${m.sst}°F (${toC(m.sst)}°C)` : ''].filter(Boolean).join(' · '));
     if (m.sunrise) lines.push(`🌅 Sunrise ${m.sunrise} · 🌇 Sunset ${m.sunset}`);
     if (m.wind != null) lines.push(`💨 Wind: ${m.dir ? m.dir + ' ' : ''}${m.wind} kt (${m.mph} mph / ${Math.round(m.wind * 1.852)} km/h)${m.gust ? `, gusts ${m.gust} kt` : ''}`);
     if (m.waveFt != null) lines.push(`🌊 Seas: ${m.waveFt} ft (${(m.waveFt / 3.28084).toFixed(1)} m) · ${m.sea[1]}${m.waveTypical ? ' (typical)' : ''}`);
     if (m.hi == null && m.wind == null && m.waveFt == null) lines.push('Weather not available yet.');
+    storms.forEach(st => lines.push(`⚠️ ${stormLine(st)} (NHC)`));
     if (next) {
       const nd = next.day;
       const where = nd.type === 'sea' ? 'Sea day' : nd.name.split(',')[0].toUpperCase();
@@ -369,11 +480,12 @@
     return lines.join('\n');
   }
 
-  function waVoyage(cruise, models, url) {
+  function waVoyage(cruise, models, url, storms = []) {
     const short = iso => toUTC(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC' });
     const lines = [
       `🚢 *${cruise.ship} · ${cruise.title}*`,
       `${cruise.line} · ${fmtRange(cruise.start, cruise.end)}`,
+      ...storms.map(st => `⚠️ ${stormLine(st)} (NHC)`),
       ''
     ];
     let anyTypical = false, anyTypicalSeas = false;
@@ -416,7 +528,7 @@
   }
 
   function drawMap(cruise, today) {
-    if (typeof L === 'undefined') { document.getElementById('map').remove(); return; }
+    if (typeof L === 'undefined') { document.getElementById('map').remove(); return null; }
     const map = L.map('map', { scrollWheelZoom: false, attributionControl: true });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 12, attribution: '© OpenStreetMap'
@@ -438,6 +550,7 @@
       }
     });
     map.fitBounds(L.latLngBounds(pts).pad(0.15));
+    return map;
   }
 
   async function renderCruise(cruise) {
@@ -455,12 +568,15 @@
         <p class="dates">${esc(fmtRange(cruise.start, cruise.end))} <span class="status ${st.kind}">${esc(st.text)}</span></p>
       </section>
 
+      <div id="storms"></div>
+
       ${tracker ? `<section class="card ship-now">
         <div><h2>Where's the ship right now?</h2><p>Live AIS position from VesselFinder.</p></div>
         <a class="btn" href="${esc(tracker)}" target="_blank" rel="noopener">Track ${esc(cruise.ship)} →</a>
       </section>` : ''}
 
       <div id="map" class="map" role="img" aria-label="Route map"></div>
+      <p class="pos" id="pos" hidden></p>
 
       <section>
         <div class="sec-head">
@@ -485,7 +601,41 @@
         </div>
       </section>`;
 
-    drawMap(cruise, today);
+    const map = drawMap(cruise, today);
+    const locs = buildLocations(cruise.days);
+    let storms = [];
+
+    // Estimated position: only around the sailing dates; refreshed every 5 minutes.
+    if (diffDays(cruise.start, today) <= 1 && diffDays(today, cruise.end) <= 1) {
+      om(API.forecast, { ...coordParams(locs), timezone: 'auto', forecast_days: 1, daily: 'sunrise' }).then(res => {
+        const offsets = cruise.days.map(d => res[d._loc]?.utc_offset_seconds);
+        const pts = waypoints(cruise, offsets);
+        let marker = null;
+        const tick = () => {
+          const p = shipNow(cruise, pts, Date.now());
+          const el = document.getElementById('pos');
+          if (!p) { el.hidden = true; if (marker) { marker.remove(); marker = null; } return; }
+          el.hidden = false;
+          el.innerHTML = `🚢 <strong>Estimated position:</strong> ${esc(p.text)} <small>(from the itinerary, not live tracking)</small>`;
+          if (map && typeof L !== 'undefined') {
+            if (!marker) marker = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'ship-icon', html: '🚢', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 1000 }).addTo(map).bindTooltip('Estimated position');
+            else marker.setLatLng([p.lat, p.lon]);
+          }
+        };
+        tick(); setInterval(tick, 5 * 60e3);
+      }).catch(() => { /* position is optional */ });
+    }
+
+    loadStorms(cruise, today).then(list => {
+      storms = list;
+      if (!list.length) return;
+      document.getElementById('storms').innerHTML = list.map(st => `
+        <section class="alert" role="alert">
+          <strong>⚠️ ${esc(st.type)} ${esc(st.name)}</strong>
+          <p>${esc(stormLine(st))}.${st.lastUpdate ? ` NHC update ${esc(new Date(st.lastUpdate).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}.` : ''}</p>
+          <p><a href="${esc(st.advisoryUrl || 'https://www.nhc.noaa.gov/')}" target="_blank" rel="noopener">Read the NHC advisory →</a> Check with your cruise line for itinerary changes.</p>
+        </section>`).join('');
+    });
 
     let models = cruise.days.map((d, i) => dayModel(d, i, cruise, today, null, null));
     const shareUrl = `${location.origin}${location.pathname}?c=${encodeURIComponent(slug)}`;
@@ -496,7 +646,7 @@
       return diffDays(cruise.start, today) > 0 ? 0 : cruise.days.length - 1;
     };
     const copyDay = async k => {
-      const ok = await copyText(waDay(cruise, models[k], models[k + 1] || null, shareUrl));
+      const ok = await copyText(waDay(cruise, models[k], models[k + 1] || null, shareUrl, storms));
       toast(ok ? `Day ${k + 1} copied, paste it into WhatsApp` : 'Copy failed: your browser blocked clipboard access');
     };
     app.addEventListener('click', async e => {
@@ -505,7 +655,7 @@
       if (btn.dataset.copyDay != null) copyDay(+btn.dataset.copyDay);
       else if (btn.id === 'copy-today') copyDay(todayIndex());
       else if (btn.id === 'copy-voyage') {
-        const ok = await copyText(waVoyage(cruise, models, shareUrl));
+        const ok = await copyText(waVoyage(cruise, models, shareUrl, storms));
         toast(ok ? 'Voyage copied, paste it into WhatsApp' : 'Copy failed: your browser blocked clipboard access');
       }
     });
@@ -513,7 +663,6 @@
     const load = async (force) => {
       const upd = document.getElementById('updated');
       upd.textContent = 'Loading weather…';
-      const locs = buildLocations(cruise.days);
       const liveDates = [], archDates = [];
       cruise.days.forEach(d => {
         const dd = diffDays(d.date, today);
