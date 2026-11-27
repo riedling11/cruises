@@ -1,6 +1,6 @@
 # Cruise Weather
 
-A static site, hosted on GitHub Pages, that shows day-by-day weather and sea conditions along a cruise itinerary. There is no server, build step, API key or scheduled job. The browser fetches everything when the page loads.
+A static site, hosted on GitHub Pages, that shows day-by-day weather and sea conditions along a cruise itinerary. There is no server, build step or API key. The browser fetches the weather when the page loads. The only scheduled job is the GitHub Action that refreshes tropical-storm data (see Tropical storm alerts).
 
 - Cruise list: `https://riedling11.github.io/cruises/`
 - A single cruise: `https://riedling11.github.io/cruises/?c=<slug>`
@@ -69,7 +69,7 @@ For each itinerary day, `app.js` compares the date with the viewer's local date 
 | **Forecast** | Date is today up to 15 days ahead | Open-Meteo Forecast API (`api.open-meteo.com/v1/forecast`) + Marine API (`marine-api.open-meteo.com/v1/marine`) |
 | **Recorded** | Date is 1–60 days in the past | Same Forecast + Marine APIs (they serve recent past days) |
 | **Recorded** | Date is more than 60 days in the past | Archive API (`archive-api.open-meteo.com/v1/archive`) + Marine API |
-| **Typical** | Date is more than 15 days ahead | Ten-year climatology, computed in the browser (below) |
+| **Typical** | Date is more than 15 days ahead | Climatology computed in the browser (below): ten years for most values, fewer for UV and water temperature |
 
 Values are filled in field by field. If a forecast day has temperature but no wave data (marine forecasts don't reach as far ahead as weather forecasts), the seas value comes from the typical figure and is labeled "Seas (typical)".
 
@@ -81,18 +81,18 @@ Constants at the top of `app.js`:
 | `RECENT_BACK` | `60` | Days back served by the forecast API before switching to the archive API. |
 | `TYPICAL_YEARS` | `10` | Years of history used for typical values. |
 | `TYPICAL_WINDOW` | `3` | ± days around each date that count toward typical. |
-| `CACHE_VERSION` | `v5` |
+| `CACHE_VERSION` | `v5` | Bump to invalidate every viewer's cached typical values. |
 | `CACHE_DAYS` | `7` | Days a viewer's cached typical values are reused. |
 | `SST_FIRST_YEAR` | `2023` | First year with water-temperature history. |
 | `UV_FIRST_YEAR` | `2022` | First year with UV history. |
-| `PORT_RAIN_IN` | `0.02` | Inches of rain during port hours that count as a wet port day (typical only). | Bump to invalidate every viewer's cached typical values. |
+| `PORT_RAIN_IN` | `0.02` | Inches of rain during port hours that count as a wet port day (typical only). |
 
 ## Typical (climatology) calculation
 
 Function `loadTypical()`:
 
 - **Years:** the 10 full years before the cruise year, or before the current year if that is earlier.
-- **Requests:** one Archive API request and one Marine API request per year. Every unique location goes into a single request (comma-separated `latitude`/`longitude`), and the date range is cruise `start − 3` to `end + 3`, moved into that year. Marine history is requested with `models=era5_ocean`, retried without the model parameter if that fails.
+- **Requests:** per history year, up to five requests: Archive API (daily weather), Marine API (waves), Marine API (water temperature, 2023+), Historical Forecast API (UV, 2022+) and Archive API (hourly rain at port locations). That is about 40 requests on a first visit, then none until the cache expires. Every unique location goes into a single request (comma-separated `latitude`/`longitude`), and the date range is cruise `start − 3` to `end + 3`, moved into that year. Marine history is requested with `models=era5_ocean`, retried without the model parameter if that fails.
 - **Archive request parameters:** `daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,apparent_temperature_max,relative_humidity_2m_mean,wind_direction_10m_dominant,sunrise,sunset`, `temperature_unit=fahrenheit`, `wind_speed_unit=kn`, `precipitation_unit=inch`, `timezone=auto`.
 - **Marine request parameters:** `daily=wave_height_max`, `timezone=auto`.
 - **Per day:** collects every value from the same calendar date ±3 days across all 10 years (up to 70 samples) at that day's location, then:
@@ -102,14 +102,14 @@ Function `loadTypical()`:
   - UV: from `historical-forecast-api.open-meteo.com/v1/forecast` (`daily=uv_index_max`), one request per history year from 2022 onward (`UV_FIRST_YEAR`), median of the samples. The archive API has no UV.
   - rain while in port (port days with both `arrive` and `depart`): one extra Archive API request per year for just those port locations, `hourly=precipitation` in inches. For each sample day, precipitation is summed over the port hours (same hour window as the forecast version). The figure is the percentage of sample days where that sum is at least 0.02 in (`PORT_RAIN_IN`). Shown as "A shower while in port on N% of past days" on the card, "a shower on N% of past days" in the WhatsApp day post and "showers in port N% of days" in the voyage post. This counts brief showers, so it can be well above the "Rainy days" figure, which counts days with at least 0.1 in.
   - "Rainy days" %: share of samples with `precipitation_sum ≥ 0.1 in`
-  - sky icon: from the rainy-days % (under 25 → 🌤️, 25–49 → ⛅, 50+ → 🌦️)
+  - sky label: from the rainy-days % (under 25 → 🌤️ Usually dry, 25–49 → ⛅ Some showers, 50+ → 🌦️ Often showery)
 - **Cache:** the result is stored in `localStorage` under `typ:<CACHE_VERSION>:<slug>:<itinerary fingerprint>`, with a timestamp, and reused for `CACHE_DAYS` (7) days. It is only stored when temperatures, wave heights and UV all came back, so a partial load (for example after a rate-limit refusal) is retried on the next visit. Bump `CACHE_VERSION` whenever the typical calculation gains or changes a field, otherwise viewers keep the old cached values. Editing any day's date or coordinates changes the fingerprint and forces a recalculation. The Refresh button clears this cache for the current cruise.
 
 ## Live / recorded calculation
 
 Functions `loadLive()` (forecast API) and `loadArchiveActual()` (archive API). Each sends one weather request and one marine request covering all unique locations, with the date range set to the earliest and latest qualifying itinerary dates.
 
-- **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset`. The archive API omits `precipitation_probability_max`.
+- **Weather `daily` fields:** `weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, relative_humidity_2m_mean, precipitation_probability_max, precipitation_sum, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, sunrise, sunset, cloud_cover_mean, uv_index_max`. The archive API omits `precipitation_probability_max` and `uv_index_max`.
 - **Hourly fields:** `precipitation_probability` (forecast only), used for the port-hours rain chance below.
 - **Marine fields:** `daily=wave_height_max`, `hourly=sea_surface_temperature` (°F). Water temperature is the mean of that day's hourly values. For typical days, water-temperature history only exists from 2023 onward (`SST_FIRST_YEAR`) and not in the ERA5-Ocean model, so the typical calculation makes a separate marine request (default model, `hourly=sea_surface_temperature`) for each history year from 2023 onward and takes the median of the daily means. Typical water temperature is therefore based on about three years, not ten.
 - **UV:** `uv_index_max`, rounded. Typical days use the median from the Historical Forecast API (below). Shown with its category: under 3 low, 3–5 moderate, 6–7 high, 8–10 very high, 11+ extreme.
@@ -148,7 +148,7 @@ Shown from the day before sailing to the day after it ends. It's estimated from 
   - up to 18 hours before the first departure: in port at the embarkation port
   - up to 12 hours after the last arrival: "Arrived in <port>"
   - otherwise: hidden
-- **Display:** a 🚢 marker on the map and a line under it.
+- **Display:** a 🚢 marker on the route map and a line under it.
 
 ## Tropical storm alerts
 
@@ -211,4 +211,4 @@ Copying uses `navigator.clipboard.writeText`. If the browser blocks that, it fal
 | unpkg.com (Leaflet 1.9.4) | Map library | None |
 | OpenStreetMap tiles | Map tiles | Attribution required (shown on the map) |
 | MarineTraffic | Track button (link only) | — |
-| VesselFinder | Embedded live map during the cruise (`aismap.js` in an iframe) | Free embed, no key |
+| VesselFinder | Embedded live map during the cruise (`/aismap` framed directly) | Free embed, no key |
